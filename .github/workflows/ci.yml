@@ -17,6 +17,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
 
+    # Minimum env for modules that validate config at import time
+    # (src/lib/server/env.ts). Real values come from secrets at deploy time.
+    env:
+      PUBLIC_BASE_URL: http://localhost:3000
+      PUBLIC_BRAND: Hilo
+      ADMIN_EMAIL: ci@example.com
+      AUTH_FIXED_PASSWORD: '1234'
+      SESSION_SECRET: ci-only-not-secret-very-long-placeholder-string
+      SMTP_USER: ci@example.com
+      SMTP_PASS: ci-placeholder
+      SMTP_FROM: ci@example.com
+
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +38,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'pnpm'
 
       - name: Install dependencies
