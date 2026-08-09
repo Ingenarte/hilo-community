@@ -3,7 +3,7 @@
 # ─── deps stage ──────────────────────────────────────────────────────────────
 # Install ALL dependencies (including dev) once. Building better-sqlite3
 # requires a working python+make+g++ toolchain on alpine.
-FROM node:22-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app
 RUN apk add --no-cache python3 make g++ \
  && corepack enable \
@@ -12,7 +12,7 @@ COPY package.json pnpm-lock.yaml* .npmrc* ./
 RUN pnpm install --frozen-lockfile=false
 
 # ─── build stage ─────────────────────────────────────────────────────────────
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 RUN corepack enable \
  && corepack prepare pnpm@9.15.4 --activate
@@ -34,7 +34,7 @@ RUN ADMIN_EMAIL=build@placeholder.local \
  && rm -rf .svelte-kit/{generated,output/client,output/prerendered}
 
 # ─── runtime stage ──────────────────────────────────────────────────────────
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \
