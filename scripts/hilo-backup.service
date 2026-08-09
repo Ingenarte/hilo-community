@@ -1,0 +1,30 @@
+[Unit]
+Description=Hilo daily backup
+Documentation=https://github.com/Ingenarte/hilo-community
+Wants=hilo-backup.timer
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/hilo/scripts/backup-host.sh
+Environment=HILO_CONTAINER=hilo
+Environment=HILO_BACKUP_DIR=/var/backups/hilo
+Environment=HILO_BACKUP_KEEP_DAYS=30
+# Capture stdout/stderr into the journal so `journalctl -u hilo-backup` is useful.
+StandardOutput=journal
+StandardError=journal
+# Soft caps so a runaway backup doesn't starve the host.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=5
+
+# Hardening: backup script needs docker socket, write to /var/backups/hilo,
+# and read from $HOME — give it nothing else.
+ProtectSystem=strict
+ReadWritePaths=/var/backups/hilo /var/log
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

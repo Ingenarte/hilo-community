@@ -1,0 +1,89 @@
+services:
+  hilo:
+    build:
+      context: .
+      args:
+        # Baked into the CSRF trusted-origins list at build time.
+        PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-http://localhost:3000}"
+    image: hilo:latest
+    container_name: hilo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      # Override these in a .env file next to this compose file, or via secrets.
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-http://localhost:3000}"
+      PUBLIC_BRAND: "${PUBLIC_BRAND:-Hilo}"
+      PUBLIC_SUPPORT_EMAIL: "${PUBLIC_SUPPORT_EMAIL:-}"
+      PUBLIC_INSTANCE_OWNER: "${PUBLIC_INSTANCE_OWNER:-}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL}"
+      AUTH_FIXED_PASSWORD: "${AUTH_FIXED_PASSWORD:-1234}"
+      AUTH_ADMIN_FIXED_PASSWORD: "${AUTH_ADMIN_FIXED_PASSWORD:-}"
+      AUTH_DYNAMIC_FORMAT: "${AUTH_DYNAMIC_FORMAT:-ddmmyy}"
+      AUTH_DYNAMIC_WINDOW_DAYS: "${AUTH_DYNAMIC_WINDOW_DAYS:-1}"
+      SESSION_SECRET: "${SESSION_SECRET}"
+      SMTP_HOST: "${SMTP_HOST:-smtp.gmail.com}"
+      SMTP_PORT: "${SMTP_PORT:-465}"
+      SMTP_SECURE: "${SMTP_SECURE:-true}"
+      SMTP_USER: "${SMTP_USER}"
+      SMTP_PASS: "${SMTP_PASS}"
+      SMTP_FROM: "${SMTP_FROM}"
+      # 500 MB total per attachment. Individual chunks are 80 MB
+      # (well under the 100 MB Cloudflare Tunnel single-request ceiling).
+      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-500}"
+      # SvelteKit adapter-node body-size clamp. Chunked uploads send at
+      # most 80 MB per PATCH; single-shot paths stay under 100 MB.
+      # 110 MB gives 30 MB headroom for headers / retries.
+      BODY_SIZE_LIMIT: "${BODY_SIZE_LIMIT:-110000000}"
+      # Retention for uploaded files (days). Default 180; set to 0 to keep forever.
+      UPLOAD_RETAIN_DAYS: "${UPLOAD_RETAIN_DAYS:-180}"
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
+      VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
+      # Whisper sidecar: hilo reaches the transcription service by container name.
+      WHISPER_URL: "${WHISPER_URL:-http://hilo-whisper:8000}"
+      WHISPER_MODEL: "${WHISPER_MODEL:-Systran/faster-whisper-base}"
+      WHISPER_MAX_CONCURRENT: "${WHISPER_MAX_CONCURRENT:-1}"
+    volumes:
+      - hilo-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      whisper:
+        condition: service_started
+
+  # Self-hosted transcription sidecar (faster-whisper, CPU-only, MIT licence).
+  # The model is downloaded from HuggingFace on first start and cached in the
+  # named volume so container rebuilds don't re-download it.
+  # Port 8000 is intentionally NOT exposed to the host — only hilo talks to it.
+  #
+  # Measured on a small 2-vCPU VPS:
+  #   - Image size: 451 MB
+  #   - Idle RAM after model load: ~613 MB (limit: 1.2 GB)
+  #   - Cold first request (5 s audio): ~6.7 s
+  #   - Warm request (30 s audio): ~3.2 s
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    container_name: hilo-whisper
+    restart: unless-stopped
+    environment:
+      WHISPER_MODEL: "${WHISPER_MODEL:-Systran/faster-whisper-base}"
+    volumes:
+      - whisper-models:/root/.cache/huggingface
+    deploy:
+      resources:
+        limits:
+          memory: 1.2G
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  hilo-data:
+  whisper-models:

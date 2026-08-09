@@ -1,0 +1,22 @@
+# Optional git hooks. Install lefthook globally (`brew install lefthook` or
+# `npm i -g lefthook`) then run `lefthook install` from this directory.
+# Hooks are NOT installed by `pnpm install` — they're opt-in.
+
+pre-commit:
+  parallel: true
+  commands:
+    typecheck:
+      glob: '*.{ts,svelte}'
+      run: pnpm exec svelte-check --threshold error
+    forbid-todo:
+      glob: '*.{ts,svelte,js}'
+      run: |
+        if grep -nE 'TODO\(blocker\)|FIXME\(blocker\)' {staged_files}; then
+          echo "Blocker comments present — resolve before committing."
+          exit 1
+        fi
+
+pre-push:
+  commands:
+    build:
+      run: pnpm build

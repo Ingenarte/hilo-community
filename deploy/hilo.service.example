@@ -1,0 +1,38 @@
+# /etc/systemd/system/hilo.service
+# After editing paths/user/env for your host:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now hilo
+#
+# Logs:   journalctl -u hilo -f
+# Status: systemctl status hilo
+# Reload: systemctl restart hilo
+
+[Unit]
+Description=Hilo — feedback & support microservice
+After=network.target
+
+[Service]
+Type=simple
+User=hilo
+Group=hilo
+WorkingDirectory=/opt/hilo
+EnvironmentFile=/opt/hilo/.env
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOST=127.0.0.1
+ExecStart=/usr/bin/node /opt/hilo/build/index.js
+Restart=on-failure
+RestartSec=5
+
+# Modest sandboxing — adjust if you need broader filesystem access.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hilo/data /opt/hilo/uploads
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,58 @@
+{
+  "name": "hilo",
+  "version": "0.1.0",
+  "description": "Lightweight self-hosted ticket + chat microservice with magic-link email notifications. Open source alternative to Chatwoot/Freescout for small teams.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "node build/index.js",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "screenshots": "playwright test --config playwright.config.ts",
+    "demo": "playwright test --config playwright.config.ts tests/e2e/demo-flow.spec.ts",
+    "db:seed": "node scripts/seed.js",
+    "db:cleanup": "node scripts/cleanup.js",
+    "stage:up": "docker compose -f docker-compose.local.yml up -d --build",
+    "stage:down": "docker compose -f docker-compose.local.yml down",
+    "stage:logs": "docker compose -f docker-compose.local.yml logs -f hilo-local",
+    "stage:seed": "docker exec hilo-local node /app/scripts/seed-local.mjs",
+    "stage:reset": "docker compose -f docker-compose.local.yml down -v && DOCKER_BUILDKIT=0 docker compose -f docker-compose.local.yml up -d && until docker inspect --format='{{.State.Health.Status}}' hilo-local 2>/dev/null | grep -q healthy; do sleep 2; done && docker exec hilo-local node /app/scripts/seed-local.mjs",
+    "test:e2e": "playwright test --config playwright.local.config.ts tests/e2e/core-flows.spec.ts"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
+    "@playwright/test": "^1.50.0",
+    "@sveltejs/adapter-node": "^5.2.13",
+    "@sveltejs/kit": "^2.22.0",
+    "@sveltejs/vite-plugin-svelte": "^5.1.0",
+    "@tailwindcss/vite": "^4.1.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.10.0",
+    "@types/nodemailer": "^6.4.17",
+    "sharp": "^0.34.5",
+    "svelte": "^5.36.0",
+    "svelte-check": "^4.3.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0",
+    "vitest": "^2.1.9"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.0",
+    "nodemailer": "^6.9.16",
+    "tus-js-client": "^4.3.1"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  }
+}

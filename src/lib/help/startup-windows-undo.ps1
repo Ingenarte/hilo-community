@@ -1,0 +1,1 @@
+powershell -NoProfile -Command "$p=Join-Path ([Environment]::GetFolderPath('Startup')) 'Hilo.lnk'; if(Test-Path $p){ Remove-Item $p -Force; Write-Host ('Removed ' + $p) -ForegroundColor Green } else { Write-Host 'No Hilo startup shortcut found; nothing to remove.' -ForegroundColor Yellow }"

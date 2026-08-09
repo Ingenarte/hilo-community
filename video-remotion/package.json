@@ -1,0 +1,34 @@
+{
+  "name": "hilo-video-remotion",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone Remotion v4 project that renders the four PWA install help videos (iOS, Android, Windows, macOS) into ../static/help/<key>.{mp4,jpg}. Independent of the SvelteKit app — do NOT hoist React/Remotion into the app.",
+  "license": "MIT",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render:promo": "remotion render src/index.ts Promo ../static/promo.mp4 --codec=h264",
+    "poster:promo": "remotion still src/index.ts Promo ../static/promo.jpg --frame=520",
+    "render": "npm run render:ios && npm run render:android && npm run render:windows && npm run render:macos && npm run posters",
+    "render:ios": "remotion render src/index.ts IosInstall ../static/help/ios.mp4 --codec=h264",
+    "render:android": "remotion render src/index.ts AndroidInstall ../static/help/android.mp4 --codec=h264",
+    "render:windows": "remotion render src/index.ts WindowsInstall ../static/help/windows.mp4 --codec=h264",
+    "render:macos": "remotion render src/index.ts MacosInstall ../static/help/macos.mp4 --codec=h264",
+    "posters": "npm run poster:ios && npm run poster:android && npm run poster:windows && npm run poster:macos",
+    "poster:ios": "remotion still src/index.ts IosInstall ../static/help/ios.jpg --frame=140",
+    "poster:android": "remotion still src/index.ts AndroidInstall ../static/help/android.jpg --frame=140",
+    "poster:windows": "remotion still src/index.ts WindowsInstall ../static/help/windows.jpg --frame=140",
+    "poster:macos": "remotion still src/index.ts MacosInstall ../static/help/macos.jpg --frame=140",
+    "upgrade": "remotion upgrade"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.473",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.473"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "typescript": "5.6.3"
+  }
+}

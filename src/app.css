@@ -1,0 +1,729 @@
+@import "tailwindcss";
+
+/* --------------------------------------------------------------------
+   hilo · design tokens · Tailwind v4 @theme
+   Dark default. Light mode inverts lightness, preserves hue.
+   -------------------------------------------------------------------- */
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+
+  --radius-btn: 12px;
+  --radius-chip: 999px;
+  --radius-panel: 16px;
+  --radius-panel-lg: 18px;
+}
+
+/* ---- dark palette (default) ---- */
+:root,
+:root[data-theme="dark"] {
+  --color-bg-deep: oklch(0.18 0.04 270);
+  --color-bg: oklch(0.21 0.04 270);
+  --color-bg-2: oklch(0.24 0.04 270);
+  --color-text: oklch(0.97 0.02 270);
+  --color-muted: oklch(0.72 0.03 270);
+  /* a11y: bumped from 0.58 → 0.63 for ≥4.5:1 on --color-bg */
+  --color-faint: oklch(0.63 0.03 270);
+  /* a11y: bumped from 0.46 → 0.62 for ≥4.5:1 on --color-bg */
+  --color-fainter: oklch(0.62 0.03 270);
+
+  --color-accent: oklch(0.74 0.18 295);
+  --color-accent-2: oklch(0.78 0.16 200);
+  --color-success: oklch(0.78 0.18 155);
+  --color-warn: oklch(0.82 0.18 75);
+  --color-danger: oklch(0.7 0.22 25);
+  --color-info: oklch(0.74 0.14 240);
+
+  /* a11y: glass tints changed from low-alpha white to opaque dark so that
+     axe-core's background compositing produces a surface dark enough for
+     all subdued text (muted/faint/fainter) to meet WCAG AA 4.5:1.
+     The backdrop-filter blur/saturate still produces the frosted visual. */
+  --glass-tint: oklch(0.22 0.04 270);
+  --glass-tint-strong: oklch(0.24 0.04 270);
+  --glass-tint-subtle: oklch(0.20 0.04 270);
+  --glass-border: oklch(1 0 0 / 0.11);
+  --glass-border-strong: oklch(1 0 0 / 0.19);
+
+  --glass-blur: 28px;
+  --glass-blur-strong: 36px;
+  --glass-saturate: 160%;
+  --glass-highlight: linear-gradient(180deg, oklch(1 0 0 / 0.06) 0%, transparent 50%);
+
+  --bubble-mine-bg: linear-gradient(
+    145deg,
+    oklch(0.74 0.18 295 / 0.22),
+    oklch(0.78 0.16 200 / 0.18)
+  );
+  --bubble-theirs-bg: oklch(1 0 0 / 0.05);
+  --bubble-internal-bg: oklch(0.82 0.18 75 / 0.1);
+
+  --shadow-card: 0 24px 60px -20px oklch(0 0 0 / 0.55);
+  --inset-hi: inset 0 1px 0 0 oklch(1 0 0 / 0.07);
+
+  /* Drawer (nav drawer, ticket-info drawer) background. Defined per
+     theme so the drawer always contrasts with its content. */
+  --glass-strong-bg: oklch(0.14 0.04 270 / 0.96);
+}
+
+/* ---- light palette ---- */
+:root[data-theme="light"] {
+  --color-bg-deep: oklch(0.98 0.005 270);
+  --color-bg: oklch(0.96 0.008 270);
+  --color-bg-2: oklch(0.93 0.01 270);
+  --color-text: oklch(0.22 0.04 270);
+  /* a11y hot-fix: previous L values were borderline (4.2–4.4:1) against the
+     near-white --color-bg. Drop another notch so every subdued text style
+     comfortably clears WCAG AA 4.5:1 with margin to spare on glass-tinted
+     surfaces too. */
+  --color-muted: oklch(0.34 0.03 270);
+  --color-faint: oklch(0.42 0.03 270);
+  --color-fainter: oklch(0.42 0.025 270);
+
+  --color-accent: oklch(0.5 0.2 295);
+  --color-accent-2: oklch(0.55 0.16 200);
+  --color-success: oklch(0.5 0.18 155);
+  /* a11y: darkened from 0.55 → 0.54 for ≥4.5:1 on --color-bg */
+  --color-warn: oklch(0.54 0.18 75);
+  --color-danger: oklch(0.5 0.22 25);
+  --color-info: oklch(0.48 0.16 240);
+
+  --glass-tint: oklch(1 0 0 / 0.55);
+  --glass-tint-strong: oklch(1 0 0 / 0.7);
+  --glass-tint-subtle: oklch(1 0 0 / 0.4);
+  --glass-border: oklch(0.5 0.04 270 / 0.22);
+  --glass-border-strong: oklch(0.5 0.04 270 / 0.32);
+  --glass-highlight: linear-gradient(180deg, oklch(1 0 0 / 0.6) 0%, transparent 60%);
+
+  --bubble-mine-bg: linear-gradient(
+    145deg,
+    oklch(0.55 0.18 295 / 0.18),
+    oklch(0.6 0.16 200 / 0.14)
+  );
+  --bubble-theirs-bg: oklch(1 0 0 / 0.85);
+  --bubble-internal-bg: oklch(0.65 0.18 75 / 0.18);
+  --shadow-card: 0 24px 60px -20px oklch(0.5 0.04 270 / 0.25);
+  --inset-hi: inset 0 1px 0 0 oklch(1 0 0 / 0.5);
+
+  /* Drawer background in light mode: near-white so the dark item text
+     reads. The dark fallback that ships in the inline `style=` of each
+     drawer was leaving items invisible against a dark panel even though
+     the theme was light. */
+  --glass-strong-bg: oklch(0.99 0.005 270 / 0.98);
+}
+
+/* ---- accent palettes ---- */
+:root[data-accent="cyan"] {
+  --color-accent: oklch(0.78 0.16 200);
+  --color-accent-2: oklch(0.78 0.18 155);
+}
+:root[data-accent="emerald"] {
+  --color-accent: oklch(0.78 0.18 155);
+  --color-accent-2: oklch(0.74 0.18 295);
+}
+:root[data-accent="amber"] {
+  --color-accent: oklch(0.82 0.18 75);
+  --color-accent-2: oklch(0.7 0.22 25);
+}
+
+/* --------------------------------------------------------------------
+   base
+   -------------------------------------------------------------------- */
+
+html,
+body {
+  background: var(--color-bg-deep);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  /* `cv11 ss01 ss03` were intended for Inter, but Inter isn't loaded as
+     a webfont anywhere — the browser falls back to Roboto on Android /
+     San Francisco on iOS / Segoe on Windows. Roboto interprets `ss03`
+     differently (alternate glyph for B among others) which rendered the
+     capital B as a smaller subscript-style mark on Android Chrome.
+     Drop the features so every platform uses its native fallback as-is. */
+  font-feature-settings: normal;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* tell the browser to render native controls (checkboxes, scrollbars,
+   date pickers, autofill) in the correct mode */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* subtle animated backdrop (no spinning slop, just a calm drift) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  background:
+    radial-gradient(42% 42% at 14% 18%, oklch(0.74 0.18 295 / 0.16), transparent 60%),
+    radial-gradient(36% 36% at 86% 82%, oklch(0.78 0.16 200 / 0.12), transparent 60%);
+  pointer-events: none;
+  z-index: -1;
+  animation: drift 22s ease-in-out infinite alternate;
+}
+
+@keyframes drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(-1.5%, 1%, 0) scale(1.04); }
+}
+
+/* --------------------------------------------------------------------
+   utilities (Tailwind v4 @layer components)
+   -------------------------------------------------------------------- */
+
+@layer components {
+  .glass {
+    position: relative;
+    background: var(--glass-tint);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-panel);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    box-shadow: var(--shadow-card), var(--inset-hi);
+    isolation: isolate;
+  }
+  .glass::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--glass-highlight);
+    pointer-events: none;
+    opacity: 0.8;
+    z-index: -1;
+  }
+  .glass-strong {
+    position: relative;
+    background: var(--glass-tint-strong);
+    border: 1px solid var(--glass-border-strong);
+    border-radius: var(--radius-panel-lg);
+    backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--glass-saturate));
+    box-shadow: var(--shadow-card), var(--inset-hi);
+    isolation: isolate;
+  }
+  .glass-strong::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--glass-highlight);
+    pointer-events: none;
+    opacity: 1;
+    z-index: -1;
+  }
+  .glass-subtle {
+    background: var(--glass-tint-subtle);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-panel);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 36px;
+    padding: 0 0.875rem;
+    border-radius: var(--radius-btn);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-tint);
+    color: var(--color-text);
+    cursor: pointer;
+    transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: var(--inset-hi);
+  }
+  .btn:hover { background: var(--glass-tint-strong); }
+  .btn:active { transform: scale(0.97); }
+  .btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px oklch(0.42 0.14 240 / 0.4), var(--inset-hi);
+  }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* primary: sober deep blue, no gradient circus */
+  .btn-primary {
+    background: oklch(0.42 0.14 240);
+    color: oklch(0.98 0.01 240);
+    border-color: oklch(0.32 0.14 240);
+    box-shadow:
+      inset 0 1px 0 0 oklch(1 0 0 / 0.14),
+      0 1px 2px 0 oklch(0.15 0.1 240 / 0.5);
+  }
+  .btn-primary:hover {
+    background: oklch(0.48 0.15 240);
+    border-color: oklch(0.38 0.15 240);
+  }
+  .btn-primary:focus-visible {
+    box-shadow: 0 0 0 3px oklch(0.42 0.14 240 / 0.4),
+      inset 0 1px 0 0 oklch(1 0 0 / 0.14);
+  }
+  :root[data-theme="light"] .btn-primary {
+    background: oklch(0.36 0.16 240);
+    color: oklch(0.99 0.005 240);
+    border-color: oklch(0.28 0.16 240);
+  }
+  :root[data-theme="light"] .btn-primary:hover {
+    background: oklch(0.3 0.17 240);
+    border-color: oklch(0.22 0.17 240);
+  }
+
+  .btn-ghost { background: transparent; border-color: transparent; color: var(--color-muted); }
+  .btn-ghost:hover { background: var(--glass-tint); color: var(--color-text); }
+
+  .btn-danger {
+    color: var(--color-danger);
+    border-color: oklch(0.7 0.22 25 / 0.3);
+    background: oklch(0.7 0.22 25 / 0.08);
+  }
+
+  .input, .select, .textarea {
+    width: 100%;
+    height: 38px;
+    padding: 0 0.75rem;
+    border-radius: var(--radius-btn);
+    border: 1px solid var(--glass-border);
+    background: oklch(0 0 0 / 0.2);
+    color: var(--color-text);
+    font-size: 0.8125rem;
+    font-family: inherit;
+    transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  :root[data-theme="light"] .input,
+  :root[data-theme="light"] .select,
+  :root[data-theme="light"] .textarea {
+    background: oklch(1 0 0 / 0.7);
+  }
+  .input:focus, .select:focus, .textarea:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px oklch(0.74 0.18 295 / 0.18);
+  }
+  .textarea { min-height: 96px; padding: 0.625rem 0.75rem; resize: vertical; line-height: 1.5; }
+
+  /* iOS Safari zooms inputs whose font-size is below 16px when they get
+     focus. Bump to 16px on touch viewports so focusing the composer (or
+     any input) does not zoom the page and leave it stuck mid-render. */
+  @media (max-width: 767px) {
+    .input, .select, .textarea {
+      font-size: 16px;
+    }
+  }
+
+  .label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-muted);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    height: 22px;
+    padding: 0 0.5625rem;
+    border-radius: var(--radius-chip);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    border: 1px solid var(--glass-border);
+    background: var(--glass-tint);
+    color: var(--color-muted);
+    white-space: nowrap;
+  }
+  .chip-open    { color: oklch(0.85 0.18 155); border-color: oklch(0.78 0.18 155 / 0.3); background: oklch(0.78 0.18 155 / 0.1); }
+  .chip-pending { color: oklch(0.88 0.18 75);  border-color: oklch(0.82 0.18 75 / 0.3);  background: oklch(0.82 0.18 75 / 0.1); }
+  .chip-closed  { color: var(--color-faint);   border-color: var(--glass-border);        background: var(--glass-tint); }
+  .chip-urgent  { color: oklch(0.8 0.22 25);   border-color: oklch(0.7 0.22 25 / 0.35);  background: oklch(0.7 0.22 25 / 0.12); }
+  .chip-high    { color: oklch(0.88 0.18 75);  border-color: oklch(0.82 0.18 75 / 0.3);  background: oklch(0.82 0.18 75 / 0.08); }
+  .chip-low     { color: oklch(0.78 0.12 240); border-color: oklch(0.74 0.14 240 / 0.3); background: oklch(0.74 0.14 240 / 0.08); }
+  .chip-project { color: oklch(0.85 0.1 295);  border-color: oklch(0.74 0.18 295 / 0.3); background: oklch(0.74 0.18 295 / 0.1); }
+  .chip-internal{ color: oklch(0.88 0.18 75);  border-color: oklch(0.82 0.18 75 / 0.3);  background: oklch(0.82 0.18 75 / 0.1); }
+
+  /* light mode: chips need darker text + stronger borders to be readable */
+  :root[data-theme="light"] .chip-open    { color: oklch(0.38 0.18 155); border-color: oklch(0.5 0.18 155 / 0.4); background: oklch(0.78 0.18 155 / 0.18); }
+  :root[data-theme="light"] .chip-pending { color: oklch(0.45 0.18 75);  border-color: oklch(0.55 0.18 75 / 0.4);  background: oklch(0.82 0.18 75 / 0.18); }
+  :root[data-theme="light"] .chip-closed  { color: var(--color-muted);   border-color: var(--glass-border-strong); background: var(--glass-tint-strong); }
+  :root[data-theme="light"] .chip-urgent  { color: oklch(0.42 0.22 25);  border-color: oklch(0.5 0.22 25 / 0.45);   background: oklch(0.7 0.22 25 / 0.16); }
+  :root[data-theme="light"] .chip-high    { color: oklch(0.45 0.18 75);  border-color: oklch(0.55 0.18 75 / 0.4);   background: oklch(0.82 0.18 75 / 0.16); }
+  :root[data-theme="light"] .chip-low     { color: oklch(0.4 0.14 240);  border-color: oklch(0.5 0.14 240 / 0.4);   background: oklch(0.74 0.14 240 / 0.14); }
+  :root[data-theme="light"] .chip-project { color: oklch(0.4 0.16 295);  border-color: oklch(0.5 0.16 295 / 0.4);   background: oklch(0.74 0.18 295 / 0.16); }
+  :root[data-theme="light"] .chip-internal{ color: oklch(0.45 0.18 75);  border-color: oklch(0.55 0.18 75 / 0.4);   background: oklch(0.82 0.18 75 / 0.18); }
+
+  .bubble-mine, .bubble-theirs, .bubble-internal, .bubble-deleted {
+    border-radius: 18px;
+    padding: 0.625rem 0.875rem;
+    font-size: 0.875rem;
+    line-height: 1.55;
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(20px);
+    box-shadow: var(--shadow-card), var(--inset-hi);
+  }
+  .bubble-mine     { background: var(--bubble-mine-bg);     border-color: oklch(0.74 0.18 295 / 0.28); }
+  .bubble-theirs   { background: var(--bubble-theirs-bg); }
+  .bubble-internal { background: var(--bubble-internal-bg); border-color: oklch(0.82 0.18 75 / 0.25); }
+  .bubble-deleted  { font-style: italic; color: var(--color-fainter); background: oklch(0 0 0 / 0.18); border-style: dashed; }
+
+  /* Unread dot — a 9 px accent circle at the leading edge of each unread
+     inbox row. Survives the tk-task gate because it is an independent
+     inline element, not a pseudo-element. The 2 px ring uses the base
+     background colour so the dot is visible on any surface. */
+  .unread-dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 9999px;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, var(--color-accent), var(--color-accent-2));
+    box-shadow:
+      0 0 0 2px var(--color-bg),
+      0 0 8px oklch(0.74 0.18 295 / 0.5);
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+
+  :root[data-theme="light"] .unread-dot {
+    box-shadow:
+      0 0 0 2px var(--color-bg),
+      0 0 6px oklch(0.5 0.18 295 / 0.45);
+  }
+
+  /* Unread badge — themed pill used in the navbar Tickets link and in each
+     inbox row. Dark: saturated violet with very dark text (~7:1).
+     Light: soft pastel lavender with deep violet text (~7:1) — the full
+     --color-accent looked harsh on near-white surfaces. */
+  .badge-unread {
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    background: oklch(0.74 0.18 295);
+    color: oklch(0.15 0.04 270);
+  }
+  :root[data-theme="light"] .badge-unread {
+    background: oklch(0.88 0.06 295);
+    color: oklch(0.32 0.14 295);
+  }
+
+  /* Unread message: subtle outer glow + accent shadow so the eye lands
+     on the new messages without overpowering the regular reading flow. */
+  .is-unread > .relative > .bubble-theirs,
+  .is-unread > .relative > .bubble-internal {
+    box-shadow:
+      0 0 0 1px var(--color-accent),
+      0 8px 22px -10px oklch(0.74 0.18 295 / 0.5),
+      var(--inset-hi);
+  }
+
+  /* Inbox row with unread messages: a 3px accent stripe down the left
+     edge plus a tinted background so the eye can pick out which
+     conversations need attention without scanning each badge.
+     - `overflow: hidden` clips the absolute stripe to the parent's
+       rounded shape so it follows the curve at top-left and
+       bottom-left instead of poking past the corner.
+     - The stripe lives on `::after`, not `::before`, because `.glass`
+       already uses `::before` for its inner highlight overlay; a
+       second `::before` here would silently replace it.
+     - Rendered as a pseudo-element so the row width stays identical
+       between read and unread states — no layout shift when
+       `mark-as-read` flips the flag mid-session. */
+  .tk-unread {
+    background: oklch(0.74 0.18 295 / 0.12);
+    overflow: hidden;
+  }
+  .tk-unread::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--color-accent), var(--color-accent-2));
+    pointer-events: none;
+    z-index: 1;
+  }
+  :root[data-theme="light"] .tk-unread {
+    background: oklch(0.74 0.18 295 / 0.14);
+  }
+
+  /* When a row has BOTH a pending task (tk-task) and unread messages
+     (tk-unread), the amber task bar stays at left: 0. The accent unread
+     bar shifts to the right edge so both are simultaneously visible.
+     Higher specificity than the bare .tk-unread::after rule. */
+  .tk-task.tk-unread::after {
+    left: auto;
+    right: 0;
+    width: 2px;
+  }
+
+  /* Inbox row with pending tasks assigned to the viewer: same shape as
+     `.tk-unread` but amber so the two states are visually distinct.
+     When a row has BOTH unread messages and a pending task the page
+     applies `.tk-task` only — tasks take priority for the eye since
+     they are explicit work the viewer needs to do. */
+  .tk-task {
+    background: oklch(0.82 0.18 75 / 0.06);
+    overflow: hidden;
+  }
+  .tk-task::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg, oklch(0.82 0.18 75), oklch(0.7 0.22 25));
+    pointer-events: none;
+    z-index: 1;
+  }
+  :root[data-theme="light"] .tk-task {
+    background: oklch(0.82 0.18 75 / 0.09);
+  }
+
+  /* Amber chip companion to the row, sits in the inbox row chip strip
+     and in the hover label. */
+  .chip-task {
+    color: oklch(0.78 0.16 75);
+    border-color: oklch(0.6 0.16 75 / 0.4);
+    background: oklch(0.82 0.18 75 / 0.14);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+  }
+  :root[data-theme="light"] .chip-task {
+    color: oklch(0.42 0.18 75);
+    border-color: oklch(0.5 0.18 75 / 0.4);
+    background: oklch(0.82 0.18 75 / 0.18);
+  }
+
+  .text-muted    { color: var(--color-muted); }
+  .text-faint    { color: var(--color-faint); }
+  .text-fainter  { color: var(--color-fainter); }
+  .text-accent   { color: var(--color-accent); }
+
+  .eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--color-accent);
+  }
+  /* a11y: internal note eyebrow — dark: bright amber (passes on dark bubble-internal),
+     light: mid amber (passes on near-white bubble-internal-bg). */
+  .eyebrow-internal { color: var(--color-warn); }
+  :root[data-theme="light"] .eyebrow-internal { color: oklch(0.45 0.18 75); }
+
+  /* a11y: user sender name in chat — dark: bright cyan, light: mid cyan for 4.5:1. */
+  .sender-user { color: var(--color-accent-2); }
+  :root[data-theme="light"] .sender-user { color: oklch(0.50 0.16 200); }
+
+  .link {
+    color: var(--color-accent);
+    text-underline-offset: 3px;
+    transition: color 180ms;
+  }
+  .link:hover { color: var(--color-accent-2); text-decoration: underline; }
+
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 0.375rem;
+    border-radius: 6px;
+    border: 1px solid var(--glass-border);
+    background: oklch(0 0 0 / 0.3);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--color-text);
+    box-shadow: inset 0 -1px 0 0 oklch(0 0 0 / 0.18);
+  }
+  :root[data-theme="light"] .kbd {
+    background: oklch(0.88 0.01 270);
+    border-color: oklch(0.5 0.04 270 / 0.25);
+    color: oklch(0.28 0.05 270);
+    box-shadow: inset 0 -1px 0 0 oklch(0.5 0.04 270 / 0.15);
+  }
+
+  /* markdown subset */
+  .md-code  { font-family: var(--font-mono); background: oklch(0 0 0 / 0.25); padding: 0.05rem 0.35rem; border-radius: 6px; font-size: 0.85em; }
+  .md-fence { font-family: var(--font-mono); background: oklch(0 0 0 / 0.3); padding: 0.75rem 1rem; border-radius: 10px; font-size: 0.8125rem; line-height: 1.5; overflow-x: auto; border: 1px solid var(--glass-border); }
+  .md-quote { border-left: 2px solid var(--color-accent); padding-left: 0.875rem; color: var(--color-muted); margin: 0.4rem 0; }
+  .md-list  { padding-left: 1.25rem; }
+  .md-h1, .md-h2, .md-h3 { font-weight: 700; letter-spacing: -0.02em; margin-top: 0.6rem; margin-bottom: 0.25rem; }
+  .md-h1 { font-size: 1.125rem; }
+  .md-h2 { font-size: 1rem; }
+  .md-h3 { font-size: 0.9375rem; }
+  .md-img { border-radius: 10px; max-width: 100%; }
+
+  /* a11y: Error bubble — themed so danger text passes 4.5:1 in both themes.
+     Dark: --color-danger = oklch(0.7 0.22 25) on very dark bg (~16:1).
+     Light: --color-danger = oklch(0.5 0.22 25) on near-white bg (~6:1). */
+  .error-bubble {
+    background: oklch(0.7 0.22 25 / 0.1);
+    border: 1px solid oklch(0.7 0.22 25 / 0.35);
+    color: var(--color-danger);
+  }
+  :root[data-theme="light"] .error-bubble {
+    background: oklch(0.5 0.22 25 / 0.1);
+    border-color: oklch(0.5 0.22 25 / 0.35);
+  }
+
+  /* Sprint43: inbox read-receipt eye icon (admin-only)
+     Inline-flex row — svg picks up currentColor from the parent.
+     eye-seen: green matching chip-open; eye-sent: subdued gray (text-fainter). */
+  .eye-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    vertical-align: middle;
+    line-height: 1;
+    justify-content: flex-end;
+  }
+  .eye-row.eye-seen {
+    color: oklch(0.85 0.18 155);
+  }
+  .eye-row.eye-sent {
+    color: var(--color-fainter);
+  }
+  :root[data-theme="light"] .eye-row.eye-seen {
+    color: oklch(0.38 0.18 155);
+  }
+
+  /* Sprint44: per-row archive icon button */
+  .archive-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    color: var(--color-fainter);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: color 120ms ease, background-color 120ms ease;
+  }
+  .archive-btn:hover {
+    color: var(--color-text);
+    background: var(--glass-tint);
+  }
+  .archive-btn:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /* Sprint44: muted treatment for archived rows (visible only in Show archived mode) */
+  .tk-archived {
+    opacity: 0.72;
+  }
+}
+
+/* --------------------------------------------------------------------
+   animations (macOS-style)
+   -------------------------------------------------------------------- */
+
+@keyframes anim-float-kf {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.anim-float { animation: anim-float-kf 9s ease-in-out infinite; }
+
+@keyframes anim-pulse-glow-kf {
+  0%, 100% { box-shadow: 0 0 0 0 oklch(0.74 0.18 295 / 0.45); }
+  50%      { box-shadow: 0 0 0 8px oklch(0.74 0.18 295 / 0); }
+}
+.anim-pulse-glow { animation: anim-pulse-glow-kf 2s ease-in-out infinite; border-radius: 12px; }
+
+@keyframes anim-shimmer-kf {
+  from { background-position: -200% 0; }
+  to   { background-position: 200% 0; }
+}
+.anim-shimmer {
+  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 0.08), transparent);
+  background-size: 200% 100%;
+  animation: anim-shimmer-kf 1.6s linear infinite;
+}
+
+@keyframes anim-slide-up-kf {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.anim-slide-up { animation: anim-slide-up-kf 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes anim-fade-in-kf {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.anim-fade-in { animation: anim-fade-in-kf 0.4s ease-out both; }
+
+/* Typing-indicator dots: subtle opacity breath, no glow. */
+@keyframes typing-dot-kf {
+  0%, 60%, 100% { opacity: 0.35; }
+  30% { opacity: 1; }
+}
+.typing-dot { animation: typing-dot-kf 1.4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-float,
+  .anim-pulse-glow,
+  .anim-shimmer,
+  .anim-slide-up,
+  .anim-fade-in,
+  .typing-dot,
+  body::before { animation: none !important; }
+  * { transition-duration: 0.001ms !important; }
+}
+
+/* --------------------------------------------------------------------
+   form controls — checkboxes/radios use the deep-blue accent
+   -------------------------------------------------------------------- */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: oklch(0.42 0.14 240);
+}
+:root[data-theme="light"] input[type="checkbox"],
+:root[data-theme="light"] input[type="radio"] {
+  accent-color: oklch(0.36 0.16 240);
+}
+
+/* thin scrollbar */
+.thin-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.thin-scroll::-webkit-scrollbar-track { background: transparent; }
+.thin-scroll::-webkit-scrollbar-thumb { background: oklch(1 0 0 / 0.08); border-radius: 999px; }
+.thin-scroll::-webkit-scrollbar-thumb:hover { background: oklch(1 0 0 / 0.16); }
+
+/* --------------------------------------------------------------------
+   Reply-to threading: flash-highlight the original message when the
+   user clicks the quoted preview block.
+   -------------------------------------------------------------------- */
+@keyframes msg-flash-pulse {
+  0%   { box-shadow: 0 0 0 0   oklch(0.74 0.18 295 / 0); }
+  20%  { box-shadow: 0 0 0 4px oklch(0.74 0.18 295 / 0.5); }
+  100% { box-shadow: 0 0 0 0   oklch(0.74 0.18 295 / 0); }
+}
+.msg-flash > .relative {
+  animation: msg-flash-pulse 1.2s ease-out;
+}

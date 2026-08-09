@@ -1,0 +1,37 @@
+# Hilo · Caddy reverse-proxy template
+# Drop this snippet into your Caddyfile (or include it from one) and reload Caddy.
+# Replace `feedback.example.com` with your real hostname.
+
+feedback.example.com {
+	# Auto-HTTPS via Let's Encrypt.
+	encode zstd gzip
+
+	# Send everything to the Node process. Hilo listens on 3000 by default
+	# (adapter-node honors PORT).
+	reverse_proxy 127.0.0.1:3000 {
+		# So Hilo sees the real client IP for rate-limiting / audit logs.
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up Host {host}
+	}
+
+	# Allow the 20 MB attachment uploads.
+	request_body {
+		max_size 25MB
+	}
+
+	# Sensible security headers (override per your policy).
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# SSE: do not buffer responses.
+		-Server
+	}
+
+	# Disable Caddy's response buffering for the SSE stream.
+	@sse path /api/messages/*/stream
+	reverse_proxy @sse 127.0.0.1:3000 {
+		flush_interval -1
+	}
+}

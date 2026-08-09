@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#67e8f9"/>
+    </linearGradient>
+  </defs>
+  <!-- Lowercase "h" with a loop on the bowl + trailing tail.
+       Hand-drawn approximation of the AI-generated mark so the favicon
+       stays crisp at any size. The higher-fidelity raster lives at
+       /static/logo.png. -->
+  <path
+    d="M 19 16 V 50
+       M 19 34 C 22 26, 31 23, 33 28 C 35 33, 27 36, 26 32 C 25 29, 28 28, 31 29 C 33 30, 34 33, 34 36 V 50
+       L 47 50"
+    stroke="url(#g)"
+    stroke-width="5.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

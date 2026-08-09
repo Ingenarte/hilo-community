@@ -1,0 +1,1 @@
+/usr/bin/osascript -e 'tell application "System Events" to delete every login item whose name is "Hilo"' -e 'tell application "System Events" to delete every login item whose path contains "Hilo.app"'

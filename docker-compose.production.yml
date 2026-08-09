@@ -1,0 +1,77 @@
+# Production override (host behind Cloudflare Tunnel).
+#
+# Usage on the server:
+#   docker compose -f docker-compose.yml -f docker-compose.production.yml up -d
+#
+# Secrets: this stack expects a `.env` file in the same directory as the
+# compose files (Docker Compose reads it for ${VAR} substitution). Keep the
+# real production env file OUTSIDE the checkout (e.g. /etc/hilo/hilo.env,
+# chmod 0600) and reference it via `env_file:` or a symlink.
+#
+# What this overlay does on top of the base compose:
+#   - drops the localhost port binding in favour of an internal docker network
+#     so cloudflared (sibling container or host process) reaches the app via
+#     http://hilo:3000 — port 3000 is never exposed to the host
+#   - caps Docker's JSON log at 50 MB × 3 files so /var/lib/docker doesn't
+#     slowly fill the disk between rotations
+#   - `stop_grace_period: 25s` so SIGTERM has time to drain workers + WAL
+#     checkpoint before SIGKILL (default 10s is tight on a busy disk)
+#   - logging tag = "hilo" for easy grep in journalctl / Loki
+
+services:
+  hilo:
+    ports: !reset []
+    # Alias the service as `host.docker.internal` so a Cloudflare Tunnel
+    # dashboard config that uses that hostname as its origin keeps working
+    # when cloudflared runs in the same docker network.
+    networks:
+      hilo-net:
+        aliases:
+          - host.docker.internal
+    stop_grace_period: 25s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+        tag: "hilo"
+
+  # Whisper sidecar in production: same log caps as hilo, AND joined to
+  # the shared `hilo-net` bridge so the hilo container can reach the
+  # sidecar by name. Without this override Compose puts whisper on the
+  # default project network while hilo lives on hilo-net (declared
+  # above), and `fetch http://hilo-whisper:8000` from the app fails
+  # with "bad address" because Docker DNS is per-network.
+  whisper:
+    networks:
+      - hilo-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+        tag: "hilo-whisper"
+
+  # Cloudflare Tunnel sidecar. Reaches hilo via the docker network at
+  # http://hilo:3000 — port 3000 is never exposed to the host. The
+  # CLOUDFLARED_TOKEN identifies the tunnel; same token = same public
+  # hostname, regardless of which host runs the container.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: hilo-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARED_TOKEN}
+    depends_on:
+      - hilo
+    networks:
+      - hilo-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+        tag: "cloudflared"
+
+networks:
+  hilo-net:
+    driver: bridge

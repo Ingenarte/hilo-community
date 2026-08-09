@@ -1,0 +1,45 @@
+# Hilo · nginx reverse-proxy template
+# Place under /etc/nginx/sites-available/hilo.conf and symlink into sites-enabled.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name feedback.example.com;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name feedback.example.com;
+
+    # ssl_certificate     /etc/letsencrypt/live/feedback.example.com/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/feedback.example.com/privkey.pem;
+
+    client_max_body_size 25M;
+
+    # SSE needs no buffering.
+    location ~ ^/api/messages/[0-9]+/stream$ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        gzip off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
