@@ -6,7 +6,7 @@
   const BASE_URL = pubEnv.PUBLIC_BASE_URL || 'http://localhost:5180';
   // Upstream open-source repository advertised on the landing page.
   const REPO_URL = 'https://github.com/Ingenarte/hilo-community';
-  // Optional: name of the organization hosting this instance (e.g. "Ingenarte").
+  // Optional: name of the organization hosting this instance (e.g. "Acme").
   // When unset, the owner-specific copy is omitted.
   const OWNER = pubEnv.PUBLIC_INSTANCE_OWNER || '';
 
@@ -14,7 +14,7 @@
   const FEATURES = [
     {
       title: 'Threaded tickets, realtime chat',
-      body: 'One thread per topic with live updates over server-sent events — typing indicators, reactions and message editing included.'
+      body: 'One thread per topic with live updates over server-sent events: typing indicators, reactions and message editing included.'
     },
     {
       title: 'Voice, transcribed on your hardware',
@@ -34,7 +34,7 @@
     },
     {
       title: 'Email that works both ways',
-      body: 'Rich themed notification emails with magic-link sign-in that lands on the exact conversation — and inbound email becomes a ticket automatically.'
+      body: 'Rich themed notification emails with magic-link sign-in that lands on the exact conversation, and inbound email becomes a ticket automatically.'
     },
     {
       title: 'Notifications on your terms',
@@ -56,12 +56,12 @@
 </script>
 
 <svelte:head>
-  <title>{BRAND} — self-hosted tickets + chat for small teams</title>
+  <title>{BRAND}: self-hosted tickets + chat for small teams</title>
   <meta
     name="description"
     content="Hilo is a free, open-source, self-hosted ticket and chat platform: realtime threads, voice notes with on-device transcription, resumable uploads, tasks, magic-link email and web push." />
   <link rel="canonical" href={BASE_URL} />
-  <meta property="og:title" content="{BRAND} — self-hosted tickets + chat" />
+  <meta property="og:title" content="{BRAND}: self-hosted tickets + chat" />
   <meta property="og:description" content="Free and open source. Clone it, run docker compose up, and own your support stack." />
   <meta property="og:image" content="{BASE_URL}/og-card.png" />
   <meta property="og:type" content="website" />
@@ -100,8 +100,8 @@
       for small teams.
     </h1>
     <p class="text-base sm:text-lg text-muted max-w-2xl mx-auto mb-8">
-      All the support tooling you actually need — realtime threads, voice notes,
-      big file uploads, tasks and notifications — running on your own server.
+      All the support tooling you actually need: realtime threads, voice notes,
+      big file uploads, tasks and notifications, running on your own server.
       Free and open source.
     </p>
     <div class="flex items-center justify-center gap-3 flex-wrap">
@@ -111,7 +111,7 @@
         rel="noopener"
         class="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold"
         style="background: var(--color-accent); color: #fff;">
-        Get the code — it's open source
+        Get the code, it's open source
       </a>
       <a
         href="/login"
@@ -128,8 +128,8 @@
       <video
         controls
         preload="none"
-        poster="/promo.jpg"
-        src="/promo.mp4"
+        poster="/promo.jpg?v=2"
+        src="/promo.mp4?v=2"
         style="display: block; width: 100%; aspect-ratio: 16 / 9; background: #0b0f1a;">
         <track kind="captions" />
       </video>
@@ -180,7 +180,7 @@
 
   <footer class="max-w-6xl mx-auto px-5 sm:px-10 pb-10 text-center text-sm text-fainter">
     {BRAND} ·
-    {#if OWNER}This instance is hosted by {OWNER} — accounts are invite-only.{:else}Accounts on this instance are invite-only.{/if}
+    {#if OWNER}This instance is hosted by {OWNER}; accounts are invite-only.{:else}Accounts on this instance are invite-only.{/if}
     <a href="/login" style="color: var(--color-accent);">Log in</a> ·
     <a href={REPO_URL} target="_blank" rel="noopener" style="color: var(--color-accent);">Source on GitHub</a>
   </footer>

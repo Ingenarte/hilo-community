@@ -14,6 +14,8 @@ export type SessionUser = {
 	role: 'user' | 'admin';
 	theme: Theme;
 	accent: Accent;
+	/** Set only on browser sessions: a temporary password must be replaced first. */
+	mustChangePassword?: boolean;
 };
 
 export function setUserTheme(userId: number, theme: Theme): void {
@@ -170,6 +172,39 @@ export async function setUserPassword(userId: number, plain: string): Promise<vo
 }
 
 /**
+ * The user picks a new password while signed in (forced first-login screen or
+ * Preferences). Clears the "must change" flag, records the change and signs
+ * out every other device; `keepSessionId` is the session that stays.
+ * Returns how many other sessions were revoked.
+ */
+export async function changeUserPassword(
+	userId: number,
+	plain: string,
+	keepSessionId: string
+): Promise<number> {
+	const hash = await hashPassword(plain);
+	return db.transaction(() => {
+		db.prepare(
+			`UPDATE users
+			 SET password_hash = ?, must_change_password = 0, password_changed_at = unixepoch()
+			 WHERE id = ?`
+		).run(hash, userId);
+		return db
+			.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?')
+			.run(userId, keepSessionId).changes;
+	})();
+}
+
+/**
+ * Replace the password with a random one nobody knows. Used when an admin
+ * resets an account or a user is invited: the old password stops working and
+ * the person sets a new one through an emailed one-time link.
+ */
+export async function invalidatePassword(userId: number): Promise<void> {
+	await setUserPassword(userId, randomBytes(24).toString('base64url'));
+}
+
+/**
  * Create a new session for the user and return its id.
  *
  * `deviceInfo` is captured from the incoming request so /admin/users can
@@ -211,7 +246,7 @@ export function getSessionUser(sid: string | null | undefined): SessionUser | nu
 	if (!sid) return null;
 	const row = db
 		.prepare(
-			`SELECT u.id, u.email, u.role, u.theme, u.accent, s.last_seen
+			`SELECT u.id, u.email, u.role, u.theme, u.accent, u.must_change_password, s.last_seen
 			 FROM sessions s JOIN users u ON u.id = s.user_id
 			 WHERE s.id = ? AND u.disabled_at IS NULL`
 		)
@@ -222,6 +257,7 @@ export function getSessionUser(sid: string | null | undefined): SessionUser | nu
 				role: 'user' | 'admin';
 				theme: Theme;
 				accent: Accent;
+				must_change_password: number;
 				last_seen: number | null;
 		  }
 		| undefined;
@@ -238,7 +274,8 @@ export function getSessionUser(sid: string | null | undefined): SessionUser | nu
 		email: row.email,
 		role: row.role,
 		theme: row.theme,
-		accent: row.accent
+		accent: row.accent,
+		mustChangePassword: row.must_change_password === 1
 	};
 }
 

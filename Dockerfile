@@ -7,15 +7,15 @@ FROM node:22-alpine AS deps
 WORKDIR /app
 RUN apk add --no-cache python3 make g++ \
  && corepack enable \
- && corepack prepare pnpm@9.15.4 --activate
-COPY package.json pnpm-lock.yaml* .npmrc* ./
+ && corepack prepare pnpm@10.34.6 --activate
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml .npmrc* ./
 RUN pnpm install --frozen-lockfile=false
 
 # ─── build stage ─────────────────────────────────────────────────────────────
 FROM node:22-alpine AS build
 WORKDIR /app
 RUN corepack enable \
- && corepack prepare pnpm@9.15.4 --activate
+ && corepack prepare pnpm@10.34.6 --activate
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # PUBLIC_BASE_URL is needed at build time: svelte.config.js bakes it into the
@@ -41,7 +41,8 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     DATABASE_PATH=/data/hilo.db \
     UPLOAD_DIR=/data/uploads
-RUN apk add --no-cache tini sqlite \
+# ffmpeg builds the AAC rendition of WebM/Ogg voice messages (plays on iPhone).
+RUN apk add --no-cache tini sqlite ffmpeg \
  && addgroup -S hilo && adduser -S -G hilo -h /app hilo \
  && mkdir -p /data/uploads /data \
  && chown -R hilo:hilo /app /data

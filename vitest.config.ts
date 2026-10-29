@@ -1,5 +1,14 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vitest/config';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// Tests run against a throwaway SQLite file, never the developer's ./data/hilo.db.
+// Set at config-evaluation time so it also beats the value in the committed .env.
+const testDir = mkdtempSync(join(tmpdir(), 'hilo-vitest-'));
+process.env.DATABASE_PATH = join(testDir, 'hilo.db');
+process.env.UPLOAD_DIR = join(testDir, 'uploads');
 
 // We need the SvelteKit plugin here (not just in vite.config.ts) so the
 // SvelteKit virtual modules — `$env/dynamic/private`, `$env/static/public`,
@@ -12,7 +21,9 @@ export default defineConfig({
 	test: {
 		include: ['tests/**/*.test.ts'],
 		environment: 'node',
-		globals: false
+		globals: false,
+		// All files share one throwaway SQLite file, so run them one at a time.
+		fileParallelism: false
 	},
 	resolve: {
 		alias: {

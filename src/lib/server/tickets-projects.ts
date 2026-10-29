@@ -102,6 +102,13 @@ export function listProjects(): DBProject[] {
 	return db.prepare('SELECT * FROM projects ORDER BY name').all() as DBProject[];
 }
 
+/** Projects that accept new tickets (admin catalogue minus archived). */
+export function listActiveProjects(): DBProject[] {
+	return db
+		.prepare(`SELECT * FROM projects WHERE status != 'archived' ORDER BY name`)
+		.all() as DBProject[];
+}
+
 /**
  * Projects visible to a given non-admin user — the subset of active projects
  * that the admin has assigned to them in `user_projects`. Admins should call

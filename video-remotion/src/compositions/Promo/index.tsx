@@ -11,13 +11,14 @@ import { Background, GradientText, HiloGlyph } from '../../components';
 import { ACCENT, CYAN, FONT, MONO, REPO_URL, URL, VIOLET } from '../../theme';
 import { FEATURES, INTRO_FRAMES, OUTRO_FRAMES } from './data';
 import { FeatureScene } from './FeatureScene';
-import { HeygenSlot } from './HeygenSlot';
+import { CONTENT_RIGHT_PAD, NarratorPanel } from './NarratorPanel';
 
 /**
- * Hilo promo — intro (HeyGen narrator slot), ten numbered feature chapters,
- * open-source outro. ~2:36 at 30 fps, 1920x1080. Narration script lives in
- * video-remotion/NARRATION.md; scene durations are defined in ./data.ts and
- * must stay in sync with it.
+ * Hilo promo — one continuous HeyGen narration clip in a persistent right
+ * panel, with the intro, ten numbered feature chapters and the open-source
+ * outro sequenced on the left. Scene durations in ./data.ts are derived from
+ * the narration's SRT chapter timestamps, so picture and voice stay in sync.
+ * 1920x1080 @ 30 fps, ~2:46 total.
  */
 
 const Intro: React.FC = () => {
@@ -26,12 +27,16 @@ const Intro: React.FC = () => {
   const s = spring({ frame, fps, config: { damping: 200, mass: 0.8 } });
   return (
     <AbsoluteFill style={{ fontFamily: FONT, color: '#fff' }}>
-      <Background />
-      <AbsoluteFill style={{ flexDirection: 'row', alignItems: 'center', padding: 100, gap: 90 }}>
-        <HeygenSlot clip="intro" width={780} height={620} />
+      <AbsoluteFill
+        style={{
+          padding: 100,
+          paddingRight: CONTENT_RIGHT_PAD,
+          justifyContent: 'center',
+          gap: 34,
+        }}
+      >
         <div
           style={{
-            flex: 1,
             display: 'flex',
             flexDirection: 'column',
             gap: 34,
@@ -40,17 +45,20 @@ const Intro: React.FC = () => {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 28 }}>
-            <HiloGlyph size={110} id="promo-intro" />
-            <GradientText size={110}>Hilo</GradientText>
+            <HiloGlyph size={120} id="promo-intro" />
+            <GradientText size={120}>Hilo</GradientText>
           </div>
-          <div style={{ fontSize: 46, fontWeight: 700, lineHeight: 1.25, color: 'rgba(255,255,255,0.9)' }}>
+          <div style={{ fontSize: 52, fontWeight: 800, lineHeight: 1.22, color: 'rgba(255,255,255,0.92)' }}>
             Self-hosted tickets + chat
             <br />
             for small teams.
           </div>
-          <div style={{ fontFamily: MONO, fontSize: 28, color: 'rgba(255,255,255,0.55)' }}>
-            {URL}
+          <div style={{ fontSize: 32, fontWeight: 500, color: 'rgba(255,255,255,0.6)', lineHeight: 1.4 }}>
+            Ten things it does really well —
+            <br />
+            in two and a half minutes.
           </div>
+          <div style={{ fontFamily: MONO, fontSize: 28, color: CYAN }}>{URL}</div>
         </div>
       </AbsoluteFill>
     </AbsoluteFill>
@@ -61,45 +69,52 @@ const Outro: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const s = spring({ frame, fps, config: { damping: 200, mass: 0.8 } });
-  const s2 = spring({ frame: Math.max(0, frame - 30), fps, config: { damping: 200, mass: 0.7 } });
+  const s2 = spring({ frame: Math.max(0, frame - 25), fps, config: { damping: 200, mass: 0.7 } });
   return (
     <AbsoluteFill style={{ fontFamily: FONT, color: '#fff' }}>
-      <Background />
-      <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', gap: 40, padding: 100 }}>
+      <AbsoluteFill
+        style={{
+          padding: 100,
+          paddingRight: CONTENT_RIGHT_PAD,
+          justifyContent: 'center',
+          gap: 36,
+        }}
+      >
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 26,
+            gap: 24,
             opacity: interpolate(s, [0, 1], [0, 1]),
-            transform: `scale(${interpolate(s, [0, 1], [0.9, 1])})`,
+            transform: `scale(${interpolate(s, [0, 1], [0.92, 1])})`,
           }}
         >
-          <HiloGlyph size={96} id="promo-outro" />
-          <GradientText size={92}>Free & open source</GradientText>
+          <HiloGlyph size={88} id="promo-outro" />
+          <GradientText size={80}>Free & open source</GradientText>
         </div>
         <div
           style={{
-            fontSize: 40,
+            fontSize: 36,
             fontWeight: 600,
             color: 'rgba(255,255,255,0.85)',
-            textAlign: 'center',
-            lineHeight: 1.35,
+            lineHeight: 1.4,
             opacity: interpolate(s2, [0, 1], [0, 1]),
             transform: `translateY(${interpolate(s2, [0, 1], [26, 0])}px)`,
           }}
         >
-          MIT-licensed. Clone it, run <span style={{ fontFamily: MONO }}>docker compose up</span>,
+          MIT-licensed. Clone it, run{' '}
+          <span style={{ fontFamily: MONO, color: CYAN }}>docker compose up</span>,
           <br />
           and own your support stack.
         </div>
         <div
           style={{
-            padding: '24px 54px',
+            alignSelf: 'flex-start',
+            padding: '22px 46px',
             borderRadius: 999,
             background: ACCENT,
             fontFamily: MONO,
-            fontSize: 38,
+            fontSize: 32,
             fontWeight: 800,
             boxShadow: `0 0 ${50 + Math.sin(frame / 8) * 18}px ${VIOLET}88`,
             opacity: interpolate(s2, [0, 1], [0, 1]),
@@ -116,17 +131,23 @@ const Outro: React.FC = () => {
 };
 
 export const Promo: React.FC = () => (
-  <Series>
-    <Series.Sequence durationInFrames={INTRO_FRAMES}>
-      <Intro />
-    </Series.Sequence>
-    {FEATURES.map((f) => (
-      <Series.Sequence key={f.index} durationInFrames={f.durationInFrames}>
-        <FeatureScene data={f} />
+  <AbsoluteFill style={{ fontFamily: FONT }}>
+    {/* Shared animated backdrop — continuous across scene cuts. */}
+    <Background />
+    <Series>
+      <Series.Sequence durationInFrames={INTRO_FRAMES}>
+        <Intro />
       </Series.Sequence>
-    ))}
-    <Series.Sequence durationInFrames={OUTRO_FRAMES}>
-      <Outro />
-    </Series.Sequence>
-  </Series>
+      {FEATURES.map((f) => (
+        <Series.Sequence key={f.index} durationInFrames={f.durationInFrames}>
+          <FeatureScene data={f} />
+        </Series.Sequence>
+      ))}
+      <Series.Sequence durationInFrames={OUTRO_FRAMES}>
+        <Outro />
+      </Series.Sequence>
+    </Series>
+    {/* Mounted outside the Series so the narration never restarts. */}
+    <NarratorPanel />
+  </AbsoluteFill>
 );

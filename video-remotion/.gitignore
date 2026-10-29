@@ -3,3 +3,7 @@ out
 .remotion
 *.log
 .env
+
+# HeyGen source clips are too large for git (rendered output ships in static/)
+public/heygen/*.mp4
+public/heygen/*.srt

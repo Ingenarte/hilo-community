@@ -43,8 +43,62 @@ ensureColumn('messages', 'internal', `internal INTEGER NOT NULL DEFAULT 0`);
 // ticket's projects). Set NULL on group delete handled by the API.
 ensureColumn('tickets', 'group_id', `group_id INTEGER`);
 
+// Response-time targets: `sla_due_at` = last public message (or creation) + hours(priority). NULL on
+// tickets that existed before the feature, so they are not instantly overdue.
+// `priority_reason` is the justification required when a ticket is urgent.
+// Set when a message was posted by an agent through an API token.
+ensureColumn('messages', 'via_token_id', `via_token_id INTEGER`);
+ensureColumn('tickets', 'sla_due_at', `sla_due_at INTEGER`);
+ensureColumn('tickets', 'priority_reason', `priority_reason TEXT`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_tickets_sla_due ON tickets(sla_due_at)');
+
+// The response target restarts with every public message, from either side:
+// due = time of the last non-internal message (or creation) + hours(priority).
+// One-time re-computation for tickets that still carry the old creation-based
+// deadline. Closed tickets are left alone.
+if (!db.prepare(`SELECT 1 FROM app_meta WHERE key = 'sla_restart_on_message_v1'`).get()) {
+	db.transaction(() => {
+		db.exec(
+			`UPDATE tickets
+			 SET sla_due_at = COALESCE(
+			       (SELECT MAX(m.created_at) FROM messages m
+			         WHERE m.ticket_id = tickets.id AND m.internal = 0 AND m.deleted_at IS NULL),
+			       created_at
+			     ) + CASE priority
+			       WHEN 'urgent' THEN 24 WHEN 'high' THEN 48 WHEN 'low' THEN 96 ELSE 72 END * 3600
+			 WHERE sla_due_at IS NOT NULL AND status != 'closed'`
+		);
+		db.exec(`INSERT INTO app_meta (key, value) VALUES ('sla_restart_on_message_v1', 'done')`);
+	})();
+}
+
 // New in sprint-26may: per-user passwords + project status + creator track
 ensureColumn('users', 'password_hash', `password_hash TEXT`);
+// 1 = voice recording with no sound at all, 0 = has sound, NULL = not measured yet.
+ensureColumn('attachments', 'silent', `silent INTEGER`);
+// Stable, opaque WebAuthn user handle (never the email or the numeric id).
+ensureColumn('users', 'webauthn_user_handle', `webauthn_user_handle TEXT`);
+
+// Password lifecycle. `must_change_password` forces the "choose your password"
+// screen before anything else (set when a temporary password was handed out);
+// `password_changed_at` is NULL until the user picks a password themselves.
+{
+	const hadMustChange = db
+		.prepare(`SELECT 1 FROM pragma_table_info('users') WHERE name = 'must_change_password'`)
+		.get();
+	ensureColumn('users', 'must_change_password', `must_change_password INTEGER NOT NULL DEFAULT 0`);
+	ensureColumn('users', 'password_changed_at', `password_changed_at INTEGER`);
+	if (!hadMustChange) {
+		// One-time backfill: accounts that never opened a session still hold the
+		// temporary password that was emailed to them, so make the first sign-in
+		// pick a new one. Everyone else gets a non-blocking reminder instead.
+		db.exec(
+			`UPDATE users SET must_change_password = 1
+			 WHERE password_hash IS NOT NULL
+			   AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = users.id)`
+		);
+	}
+}
 ensureColumn('projects', 'status',
 	// NOTE: CHECK constraints on ALTER TABLE ADD COLUMN are not enforced in
 	// SQLite for existing rows; validation is done in application code.
@@ -300,6 +354,8 @@ export type DBTicket = {
 	title: string;
 	status: TicketStatus;
 	priority: TicketPriority;
+	priority_reason: string | null;
+	sla_due_at: number | null;
 	assigned_to: number | null;
 	group_id: number | null;
 	archived_at: number | null;
@@ -343,6 +399,7 @@ export type DBMessage = {
 	deleted_at: number | null;
 	created_at: number;
 	replied_to_message_id: number | null;
+	via_token_id: number | null;
 };
 
 export type TranscriptStatus = 'pending' | 'ready' | 'failed';
@@ -355,6 +412,8 @@ export type DBAttachment = {
 	mime_type: string;
 	size_bytes: number;
 	created_at: number;
+	/** 1 when an audio file holds no sound at all, 0 when it does, null if unmeasured. */
+	silent?: number | null;
 	// Transcription fields — null until a user requests transcription.
 	transcript_status: TranscriptStatus | null;
 	transcript_text: string | null;

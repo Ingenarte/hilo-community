@@ -8,6 +8,9 @@
 
 import { db } from './db';
 import type { DBAttachment, DBMessage } from './db';
+import { prepareRenditionInBackground } from './audioRendition';
+import { checkSilenceInBackground } from './audioSilence';
+import { DEFAULT_PRIORITY, isPriority, slaSeconds, type Priority } from '../sla';
 
 export type MessageRow = DBMessage & {
 	sender_email: string;
@@ -120,6 +123,32 @@ export function getMessagesForTicket(
 	}));
 }
 
+/**
+ * Restart the response-time target from now: due = now + hours(priority).
+ * Called on every public message and when a ticket is reopened.
+ */
+export function restartResponseTarget(ticketId: number): void {
+	const row = db.prepare('SELECT priority FROM tickets WHERE id = ?').get(ticketId) as
+		| { priority: Priority }
+		| undefined;
+	if (!row) return;
+	db.prepare('UPDATE tickets SET sla_due_at = unixepoch() + ? WHERE id = ?').run(
+		slaSeconds(isPriority(row.priority) ? row.priority : DEFAULT_PRIORITY),
+		ticketId
+	);
+}
+
+/** A user tried to write in a closed ticket: only an admin may, and only an admin can reopen it. */
+export class TicketClosedError extends Error {
+	constructor(public ticketId: number) {
+		super(`Ticket #${ticketId} is closed.`);
+		this.name = 'TicketClosedError';
+	}
+}
+
+export const TICKET_CLOSED_MESSAGE =
+	'This ticket is closed. Only an administrator can reopen it. If you need something else, open a new ticket.';
+
 export function appendMessage(args: {
 	ticketId: number;
 	senderId: number;
@@ -127,8 +156,18 @@ export function appendMessage(args: {
 	body: string;
 	internal?: boolean;
 	repliedToMessageId?: number | null;
+	/** Set when an agent posts through an API token (shown as an agent message). */
+	viaTokenId?: number | null;
 }): number {
 	const internal = args.internal ? 1 : 0;
+
+	// Closed tickets take no new messages from users (admins may still write).
+	if (args.senderRole === 'user') {
+		const st = db.prepare('SELECT status FROM tickets WHERE id = ?').get(args.ticketId) as
+			| { status: string }
+			| undefined;
+		if (st?.status === 'closed') throw new TicketClosedError(args.ticketId);
+	}
 
 	// Defensive: if a reply target is provided, verify it belongs to the same
 	// ticket and is not deleted. FK enforcement falls to application code because
@@ -147,8 +186,8 @@ export function appendMessage(args: {
 	const info = db
 		.prepare(
 			`INSERT INTO messages
-			   (ticket_id, sender_id, sender_role, body, internal, replied_to_message_id)
-			 VALUES (?, ?, ?, ?, ?, ?)`
+			   (ticket_id, sender_id, sender_role, body, internal, replied_to_message_id, via_token_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`
 		)
 		.run(
 			args.ticketId,
@@ -156,16 +195,13 @@ export function appendMessage(args: {
 			args.senderRole,
 			args.body,
 			internal,
-			args.repliedToMessageId ?? null
+			args.repliedToMessageId ?? null,
+			args.viaTokenId ?? null
 		);
 	db.prepare('UPDATE tickets SET updated_at = unixepoch() WHERE id = ?').run(args.ticketId);
-	// Reopen the ticket when a user replies on a closed thread (internal notes
-	// don't reopen — they're admin-only and shouldn't reset status).
-	if (args.senderRole === 'user' && !args.internal) {
-		db.prepare("UPDATE tickets SET status = 'open' WHERE id = ? AND status = 'closed'").run(
-			args.ticketId
-		);
-	}
+	// Every public message, from either side, restarts the response target.
+	// Internal notes are admin-only and do not.
+	if (!args.internal) restartResponseTarget(args.ticketId);
 	return Number(info.lastInsertRowid);
 }
 
@@ -181,7 +217,12 @@ export function addAttachment(args: {
 			'INSERT INTO attachments (message_id, filename, stored_name, mime_type, size_bytes) VALUES (?, ?, ?, ?, ?)'
 		)
 		.run(args.messageId, args.filename, args.storedName, args.mimeType, args.sizeBytes);
-	return Number(info.lastInsertRowid);
+	// WebM/Ogg voice messages also get an AAC rendition (plays on iPhone), and
+	// empty recordings are flagged so the chat can say so.
+	const attachmentId = Number(info.lastInsertRowid);
+	prepareRenditionInBackground(args.storedName, args.mimeType);
+	checkSilenceInBackground(attachmentId, args.storedName, args.mimeType);
+	return attachmentId;
 }
 
 export function getAttachment(id: number): DBAttachment | null {
@@ -189,6 +230,14 @@ export function getAttachment(id: number): DBAttachment | null {
 		(db.prepare('SELECT * FROM attachments WHERE id = ?').get(id) as DBAttachment | undefined) ??
 		null
 	);
+}
+
+/** Closed tickets are frozen for users: no new, edited or deleted messages. */
+export function isTicketClosed(ticketId: number): boolean {
+	const r = db.prepare('SELECT status FROM tickets WHERE id = ?').get(ticketId) as
+		| { status: string }
+		| undefined;
+	return r?.status === 'closed';
 }
 
 export function editMessage(args: {
@@ -204,6 +253,7 @@ export function editMessage(args: {
 	if (!row) return false;
 	if (row.deleted_at) return false;
 	if (args.by.role !== 'admin' && row.sender_id !== args.by.id) return false;
+	if (args.by.role !== 'admin' && isTicketClosed(row.ticket_id)) return false;
 	const newBody = args.body.slice(0, 16_000);
 	db.prepare('UPDATE messages SET body = ?, edited_at = unixepoch() WHERE id = ?').run(
 		newBody,
@@ -217,10 +267,11 @@ export function softDeleteMessage(args: {
 	by: { id: number; role: 'user' | 'admin' };
 }): boolean {
 	const row = db
-		.prepare('SELECT sender_id FROM messages WHERE id = ?')
-		.get(args.messageId) as { sender_id: number } | undefined;
+		.prepare('SELECT sender_id, ticket_id FROM messages WHERE id = ?')
+		.get(args.messageId) as { sender_id: number; ticket_id: number } | undefined;
 	if (!row) return false;
 	if (args.by.role !== 'admin' && row.sender_id !== args.by.id) return false;
+	if (args.by.role !== 'admin' && isTicketClosed(row.ticket_id)) return false;
 	// Soft-delete: keep the row so reply threading and audit don't break,
 	// but blank the body and stamp deleted_at so the UI shows a tombstone.
 	db.prepare("UPDATE messages SET body = '', deleted_at = unixepoch() WHERE id = ?").run(

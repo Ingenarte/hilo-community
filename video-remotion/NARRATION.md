@@ -1,11 +1,12 @@
 # Promo narration script (for HeyGen)
 
-English narration for the `Promo` composition (1920×1080, 30 fps, ~2:36 total).
-Each block matches one scene; durations are the frame budgets in
-`src/compositions/Promo/data.ts`. Record the intro and outro as avatar clips
-and export them as `public/heygen/intro.mp4` and `public/heygen/outro.mp4`;
-the middle chapters work best as voice-over (audio only) laid over the
-animated scenes, or as one continuous HeyGen audio track.
+English narration for the `Promo` composition (1920×1080, 30 fps, ~2:46 total).
+Record the WHOLE script as ONE continuous HeyGen avatar clip (portrait
+1080×1920) and export it as `public/heygen/narration.mp4` (+ its SRT as
+`narration.srt`). The avatar plays in a persistent right-side panel while the
+animated chapters run on the left. Scene switch times in
+`src/compositions/Promo/data.ts` are derived from the SRT chapter start
+timestamps — if you re-record, update the `T` table there from the new SRT.
 
 Speaking pace assumed: ~140 words/min. Each block is written to fit its slot
 with ~1 s of breathing room.

@@ -336,3 +336,119 @@ CREATE INDEX IF NOT EXISTS idx_upload_sessions_user
   ON upload_sessions(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_upload_sessions_expires
   ON upload_sessions(expires_at) WHERE status = 'open';
+
+-- ─── API tokens (agent access) ─────────────────────────────────────────────
+-- Personal bearer tokens for coding agents. Only the SHA-256 of the token is
+-- stored. A token with ticket_id is limited to that ticket; can_reply lets the
+-- agent post replies and change status. Tokens expire (96 h) and can be
+-- revoked; they are only honoured on /api/v1/*.
+CREATE TABLE IF NOT EXISTS api_tokens (
+	id            INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	name          TEXT NOT NULL,
+	token_hash    TEXT NOT NULL UNIQUE,
+	token_prefix  TEXT NOT NULL,
+	ticket_id     INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
+	can_reply     INTEGER NOT NULL DEFAULT 0,
+	expires_at    INTEGER NOT NULL,
+	created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+	last_used_at  INTEGER,
+	revoked_at    INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
+
+-- ─── One-time "choose your password" links ────────────────────────────────
+-- Emailed instead of a password: welcome (new account), admin reset and
+-- self-service "forgot password". Only the SHA-256 of the token is stored, a
+-- link is single use and expires, and a newer link replaces older unused ones.
+CREATE TABLE IF NOT EXISTS password_tokens (
+	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	token_hash  TEXT NOT NULL UNIQUE,
+	purpose     TEXT NOT NULL,
+	expires_at  INTEGER NOT NULL,
+	created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
+	used_at     INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_password_tokens_user ON password_tokens(user_id);
+
+-- ─── Passkeys (WebAuthn) ──────────────────────────────────────────────────
+-- Public-key credentials a user registered to sign in without a password.
+-- Only the public key is stored. `webauthn_challenges` holds the one-time
+-- challenge of an in-flight registration or sign-in (5 minutes, single use).
+CREATE TABLE IF NOT EXISTS passkeys (
+	id             INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	credential_id  TEXT NOT NULL UNIQUE,
+	public_key     TEXT NOT NULL,
+	counter        INTEGER NOT NULL DEFAULT 0,
+	transports     TEXT,
+	device_type    TEXT NOT NULL,
+	backed_up      INTEGER NOT NULL DEFAULT 0,
+	name           TEXT NOT NULL,
+	created_at     INTEGER NOT NULL DEFAULT (unixepoch()),
+	last_used_at   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_passkeys_user ON passkeys(user_id);
+
+CREATE TABLE IF NOT EXISTS webauthn_challenges (
+	id          TEXT PRIMARY KEY,
+	purpose     TEXT NOT NULL,
+	user_id     INTEGER,
+	challenge   TEXT NOT NULL,
+	expires_at  INTEGER NOT NULL
+);
+
+-- One-time data migrations already applied (see db.ts).
+CREATE TABLE IF NOT EXISTS app_meta (
+	key    TEXT PRIMARY KEY,
+	value  TEXT NOT NULL,
+	set_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+-- ─── Deadline reminders ───────────────────────────────────────────────────
+-- Per-user preferences (no row = defaults, everything on) and a log of what
+-- was already sent, so restarts and overlapping runs never repeat an email.
+CREATE TABLE IF NOT EXISTS reminder_prefs (
+	user_id          INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+	tz               TEXT,
+	work_days        INTEGER NOT NULL DEFAULT 31,    -- bit0 Mon .. bit6 Sun
+	work_start       INTEGER NOT NULL DEFAULT 540,   -- minutes from midnight
+	work_end         INTEGER NOT NULL DEFAULT 1080,
+	due_soon_enabled INTEGER NOT NULL DEFAULT 1,
+	due_soon_hours   INTEGER NOT NULL DEFAULT 24,
+	digest_enabled   INTEGER NOT NULL DEFAULT 1,
+	digest_time      INTEGER NOT NULL DEFAULT 540,
+	overdue_enabled  INTEGER NOT NULL DEFAULT 1,
+	overdue_weekday  INTEGER NOT NULL DEFAULT 2,     -- 0 Sun .. 6 Sat (Tuesday)
+	overdue_time     INTEGER NOT NULL DEFAULT 540,
+	updated_at       INTEGER NOT NULL DEFAULT (unixepoch())
+);
+
+CREATE TABLE IF NOT EXISTS reminder_log (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	kind       TEXT NOT NULL,          -- due-soon | digest | overdue-weekly
+	period_key TEXT NOT NULL,          -- local date, ISO week or the ticket's due time
+	ticket_id  INTEGER NOT NULL DEFAULT 0,
+	item_count INTEGER NOT NULL DEFAULT 0,
+	sent_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+	UNIQUE (user_id, kind, period_key, ticket_id)
+);
+CREATE INDEX IF NOT EXISTS idx_reminder_log_sent ON reminder_log(sent_at);
+
+-- ─── Response-time extensions ─────────────────────────────────────────────
+-- Anyone with access to an open ticket can ask for more time, with a written
+-- reason (like marking a ticket urgent). The deadline moves immediately and
+-- the request is kept, visible to everyone on the ticket.
+CREATE TABLE IF NOT EXISTS ticket_extensions (
+	id           INTEGER PRIMARY KEY AUTOINCREMENT,
+	ticket_id    INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+	user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+	hours        INTEGER NOT NULL,
+	reason       TEXT NOT NULL,
+	previous_due INTEGER NOT NULL,
+	new_due      INTEGER NOT NULL,
+	created_at   INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_extensions_ticket ON ticket_extensions(ticket_id);

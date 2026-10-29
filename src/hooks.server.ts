@@ -1,11 +1,17 @@
 import type { Handle } from '@sveltejs/kit';
 import { randomUUID } from 'node:crypto';
 import { SESSION_COOKIE, getSessionUser } from '$lib/server/auth';
+import { authenticateToken } from '$lib/server/apiTokens';
+import { parseBearer } from '$lib/server/tokenCrypto';
+import { passwordGate } from '$lib/server/passwordGate';
+import { loginUrlWithNext } from '$lib/server/nav';
 import { log } from '$lib/server/logger';
 import { PROD } from '$lib/server/utils';
 import { startMailWorker, stopMailWorker } from '$lib/server/mailQueue';
+import { startReminderWorker, stopReminderWorker } from '$lib/server/reminders';
 import { startImapPoller, stopImapPoller } from '$lib/server/imap';
 import { startCleanupWorker, stopCleanupWorker } from '$lib/server/cleanup';
+import { backfillSilenceFlags } from '$lib/server/audioSilence';
 import { db } from '$lib/server/db';
 import { setMailer, NodemailerMailer, MemoryMailer } from '$lib/server/mailer';
 import { setStorage, LocalFsStorage } from '$lib/server/storage';
@@ -35,8 +41,11 @@ setStorage(new LocalFsStorage(config.uploadDir));
 // Background workers boot on the first request. Idempotent — each `start*`
 // guards itself, so additional imports / restarts don't spawn duplicates.
 startMailWorker();
+startReminderWorker();
 startImapPoller();
 startCleanupWorker();
+// Flag voice recordings that hold no sound (idempotent, a handful of rows).
+setTimeout(() => backfillSilenceFlags(), 5_000).unref();
 
 // ─── Graceful shutdown ──────────────────────────────────────────────────────
 // Docker sends SIGTERM with a 10s default grace window before SIGKILL. We use
@@ -52,6 +61,7 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
 	log.info('shutdown signal received', { signal });
 	try {
 		stopMailWorker();
+		stopReminderWorker();
 		stopImapPoller();
 		stopCleanupWorker();
 		// Final WAL checkpoint + close. Safe even if the DB is already idle.
@@ -82,15 +92,72 @@ process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
 export const handle: Handle = async ({ event, resolve }) => {
 	const sid = event.cookies.get(SESSION_COOKIE);
 	event.locals.user = getSessionUser(sid);
+
+	// Agent API tokens: honoured ONLY on /api/v1/*. Anywhere else the app keeps
+	// requiring a browser session, so a leaked token (even an admin's) cannot
+	// reach admin or account endpoints.
+	let earlyResponse: Response | null = null;
+	const bearer = parseBearer(event.request.headers.get('authorization'));
+	if (bearer) {
+		if (!event.url.pathname.startsWith('/api/v1/')) {
+			earlyResponse = new Response(
+				JSON.stringify({ error: 'API tokens can only be used on /api/v1/*' }),
+				{ status: 401, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
+			);
+		} else {
+			const auth = authenticateToken(bearer);
+			if (!auth) {
+				earlyResponse = new Response(JSON.stringify({ error: 'Invalid, expired or revoked token' }), {
+					status: 401,
+					headers: {
+						'Content-Type': 'application/json',
+						'Cache-Control': 'no-store',
+						'WWW-Authenticate': 'Bearer realm="hilo"'
+					}
+				});
+			} else {
+				event.locals.user = auth.user;
+				event.locals.apiToken = auth.info;
+			}
+		}
+	}
+	// A temporary password must be replaced before anything else is reachable.
+	if (!earlyResponse && event.locals.user?.mustChangePassword && !event.locals.apiToken) {
+		const gate = passwordGate(event.url.pathname, event.request.method);
+		if (gate === 'redirect') {
+			earlyResponse = new Response(null, {
+				status: 303,
+				headers: { Location: '/change-password', 'Cache-Control': 'no-store' }
+			});
+		} else if (gate === 'block') {
+			earlyResponse = new Response(JSON.stringify({ error: 'password_change_required' }), {
+				status: 403,
+				headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+			});
+		}
+	}
 	const theme = event.locals.user?.theme ?? 'dark';
 	const accent = event.locals.user?.accent ?? 'violet';
 	const reqId = event.request.headers.get('x-request-id') || randomUUID();
 	const started = performance.now();
 
-	const response = await resolve(event, {
-		transformPageChunk: ({ html }) =>
-			html.replace('%hilo.theme%', theme).replace('%hilo.accent%', accent)
-	});
+	const response =
+		earlyResponse ??
+		(await resolve(event, {
+			transformPageChunk: ({ html }) =>
+				html.replace('%hilo.theme%', theme).replace('%hilo.accent%', accent)
+		}));
+
+	// A page that needs a session redirects to /login: remember where the person was
+	// going (an email link, a bookmark) so they land there after signing in.
+	if (
+		!event.locals.user &&
+		event.request.method === 'GET' &&
+		(response.status === 302 || response.status === 303) &&
+		response.headers.get('location') === '/login'
+	) {
+		response.headers.set('location', loginUrlWithNext(event.url.pathname + event.url.search));
+	}
 
 	// Service workers must never be served from a CDN cache — the browser
 	// compares the byte-for-byte response to detect updates, and a stale
@@ -106,7 +173,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 	// those origins are allowed here so they don't produce console violations
 	// that tank Lighthouse Best Practices.
 	response.headers.set('X-Content-Type-Options', 'nosniff');
-	response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+	// Pages that carry a secret in the URL (e.g. /set-password) set a stricter
+	// policy themselves; do not overwrite it.
+	if (!response.headers.has('Referrer-Policy')) {
+		response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+	}
 	response.headers.set('X-Frame-Options', 'DENY');
 	// Microphone is allowed for the same origin only so the composer's
 	// voice-message recorder and dictation buttons can call

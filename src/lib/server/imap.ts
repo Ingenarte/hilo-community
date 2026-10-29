@@ -28,6 +28,8 @@ import { db } from './db';
 import { config } from './env';
 import { log } from './logger';
 import { appendMessage, getTicket } from './tickets';
+import { TicketClosedError } from './tickets-messages';
+import { enqueueTicketClosedNotice } from './welcome';
 
 type ImapConfig = {
 	host: string;
@@ -365,12 +367,27 @@ async function ingestRaw(raw: string) {
 	}
 	const bodyText = trimQuotedReply(extractTextBody(headers, body));
 	if (!bodyText) return;
-	ingestMessage({
-		ticketId,
-		senderId: user.id,
-		senderRole: user.role,
-		body: bodyText
-	});
+	try {
+		ingestMessage({
+			ticketId,
+			senderId: user.id,
+			senderRole: user.role,
+			body: bodyText
+		});
+	} catch (err) {
+		if (err instanceof TicketClosedError) {
+			// Users cannot write in closed tickets: say so instead of dropping it silently.
+			enqueueTicketClosedNotice({
+				userId: user.id,
+				toEmail: user.email,
+				ticketId,
+				title: ticket.title
+			});
+			log.info('imap: reply to a closed ticket refused', { ticket_id: ticketId, from });
+			return;
+		}
+		throw err;
+	}
 	log.info('imap: ingested reply', { ticket_id: ticketId, from });
 }
 

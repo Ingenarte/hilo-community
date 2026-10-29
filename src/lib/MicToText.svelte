@@ -27,9 +27,11 @@
     sending: boolean;
     /** Disable while the phase-1 voice-message recorder is open. */
     voiceRecorderActive: boolean;
+    /** Borderless icon button, used inside the compact phone composer pill. */
+    bare?: boolean;
   };
 
-  const { ontext, sending, voiceRecorderActive }: Props = $props();
+  const { ontext, sending, voiceRecorderActive, bare = false }: Props = $props();
 
   // ── state ──────────────────────────────────────────────────────────────────
   let active = $state(false);
@@ -238,9 +240,9 @@
   <div class="flex items-center gap-1.5">
     <button
       type="button"
-      class="btn shrink-0"
-      style="height:38px; width:38px; padding:0;
-             {active ? 'background: oklch(0.74 0.18 295 / 0.18); border-color: oklch(0.74 0.18 295 / 0.5);' : ''}"
+      class="btn shrink-0 {bare ? 'btn-ghost' : ''}"
+      style="{bare ? 'height:40px; width:40px; border-radius:9999px; border-color: transparent;' : 'height:38px; width:38px;'} padding:0;
+             {active ? 'background: var(--accent-wash-strong); border-color: var(--accent-line);' : ''}"
       aria-label={active ? 'Stop dictation' : 'Dictate message (mic to text)'}
       aria-pressed={active}
       {disabled}

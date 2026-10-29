@@ -13,8 +13,10 @@
  */
 
 import { db } from './db';
+import { slaSeconds } from '$lib/sla';
 import type { DBTicket, TicketPriority, TicketStatus } from './db';
 import { getProjectNamesByTicketIds, getTicketProjectNames } from './tickets-projects';
+import { restartResponseTarget } from './tickets-messages';
 
 export type TicketRow = DBTicket & {
 	user_email: string;
@@ -41,11 +43,35 @@ export type TicketsQuery = {
 	// Defaults to 'user' (safe fallback — no internal messages counted).
 	unreadForRole?: 'user' | 'admin';
 	search?: string; // matches title + message bodies via FTS5 (with LIKE fallback)
-	status?: TicketStatus | 'any';
+	/** 'active' = everything except closed tickets (the inbox default). */
+	status?: TicketStatus | 'any' | 'active';
 	priority?: TicketPriority | 'any';
 	projectId?: number;
 	assignedTo?: number | 'unassigned'; // admin filter
 	includeArchived?: boolean;
+	/** Filter by ticket author (tickets.user_id). Independent of the visibility scope. */
+	ownerId?: number;
+	groupId?: number;
+	/** overdue: past its deadline; '24h': due within 24 hours; none: no deadline. */
+	due?: 'overdue' | '24h' | 'none';
+	/** Explicit due window in unix seconds: dueAfter < sla_due_at <= dueUntil. */
+	dueAfter?: number;
+	dueUntil?: number;
+	/** Overdue relative to this instant (unix seconds) instead of now. */
+	overdueAt?: number;
+	/** Unix seconds. */
+	updatedSince?: number;
+	createdSince?: number;
+	hasAttachments?: boolean;
+	/** Restrict to one ticket (used by ticket-scoped API tokens). */
+	onlyTicketId?: number;
+	/**
+	 * 'due' = soonest deadline first (overdue on top, no deadline last).
+	 * Others are newest first. Default: priority, then activity.
+	 */
+	sort?: 'due' | 'updated' | 'created' | 'id';
+	/** Reverse the direction of `sort`. */
+	sortReverse?: boolean;
 	limit?: number;
 	offset?: number;
 };
@@ -106,7 +132,9 @@ export function queryTickets(q: TicketsQuery = {}): TicketsPage {
 		where.push(`(${sharedClauses.join(' OR ')})`);
 		params.userId = q.userId;
 	}
-	if (q.status && q.status !== 'any') {
+	if (q.status === 'active') {
+		where.push("t.status != 'closed'");
+	} else if (q.status && q.status !== 'any') {
 		where.push('t.status = $status');
 		params.status = q.status;
 	}
@@ -119,6 +147,48 @@ export function queryTickets(q: TicketsQuery = {}): TicketsPage {
 			'EXISTS (SELECT 1 FROM ticket_projects tp WHERE tp.ticket_id = t.id AND tp.project_id = $projectId)'
 		);
 		params.projectId = q.projectId;
+	}
+	if (q.ownerId !== undefined) {
+		where.push('t.user_id = $ownerId');
+		params.ownerId = q.ownerId;
+	}
+	if (q.groupId !== undefined) {
+		where.push('t.group_id = $groupId');
+		params.groupId = q.groupId;
+	}
+	if (q.onlyTicketId !== undefined) {
+		where.push('t.id = $onlyTicketId');
+		params.onlyTicketId = q.onlyTicketId;
+	}
+	if (q.dueAfter !== undefined && q.dueUntil !== undefined) {
+		where.push('t.sla_due_at > $dueAfter AND t.sla_due_at <= $dueUntil');
+		params.dueAfter = q.dueAfter;
+		params.dueUntil = q.dueUntil;
+	}
+	if (q.overdueAt !== undefined) {
+		where.push('t.sla_due_at IS NOT NULL AND t.sla_due_at <= $overdueAt');
+		params.overdueAt = q.overdueAt;
+	}
+	if (q.due === 'overdue') {
+		where.push('t.sla_due_at IS NOT NULL AND t.sla_due_at <= unixepoch()');
+	} else if (q.due === '24h') {
+		where.push('t.sla_due_at > unixepoch() AND t.sla_due_at <= unixepoch() + 86400');
+	} else if (q.due === 'none') {
+		where.push('t.sla_due_at IS NULL');
+	}
+	if (q.updatedSince !== undefined) {
+		where.push('t.updated_at >= $updatedSince');
+		params.updatedSince = q.updatedSince;
+	}
+	if (q.createdSince !== undefined) {
+		where.push('t.created_at >= $createdSince');
+		params.createdSince = q.createdSince;
+	}
+	if (q.hasAttachments) {
+		where.push(
+			`EXISTS (SELECT 1 FROM attachments a JOIN messages am ON am.id = a.message_id
+			         WHERE am.ticket_id = t.id AND am.deleted_at IS NULL)`
+		);
 	}
 	if (q.assignedTo === 'unassigned') {
 		where.push('t.assigned_to IS NULL');
@@ -165,6 +235,27 @@ export function queryTickets(q: TicketsQuery = {}): TicketsPage {
 		      AND m2.created_at > COALESCE(r2.last_read_at, 0)
 		      AND ($unreadRole = 'admin' OR m2.internal = 0))`
 		: '0';
+	const dir = q.sortReverse ? 'ASC' : 'DESC';
+	const dueDir = q.sortReverse ? 'DESC' : 'ASC';
+	const orderBy =
+		q.sort === 'due'
+			? `t.sla_due_at IS NULL, t.sla_due_at ${dueDir}, t.id ${dueDir}`
+			: q.sort === 'updated'
+				? `t.updated_at ${dir}, t.id ${dir}`
+				: q.sort === 'created'
+					? `t.created_at ${dir}, t.id ${dir}`
+					: q.sort === 'id'
+						? `t.id ${dir}`
+						: `CASE t.priority
+			     WHEN 'urgent' THEN 0
+			     WHEN 'high'   THEN 1
+			     WHEN 'normal' THEN 2
+			     WHEN 'low'    THEN 3
+			   END,
+			   COALESCE(
+			     (SELECT MAX(created_at) FROM messages m WHERE m.ticket_id = t.id),
+			     t.updated_at
+			   ) DESC`;
 	const rows = db
 		.prepare(
 			`SELECT t.*, u.email AS user_email,
@@ -180,17 +271,7 @@ export function queryTickets(q: TicketsQuery = {}): TicketsPage {
 			         WHERE r.ticket_id = t.id AND r.user_id = t.user_id) AS owner_last_read_at
 			 FROM tickets t JOIN users u ON u.id = t.user_id
 			 ${whereClause}
-			 ORDER BY
-			   CASE t.priority
-			     WHEN 'urgent' THEN 0
-			     WHEN 'high'   THEN 1
-			     WHEN 'normal' THEN 2
-			     WHEN 'low'    THEN 3
-			   END,
-			   COALESCE(
-			     (SELECT MAX(created_at) FROM messages m WHERE m.ticket_id = t.id),
-			     t.updated_at
-			   ) DESC
+			 ORDER BY ${orderBy}
 			 LIMIT $limit OFFSET $offset`
 		)
 		.all({ ...params, limit, offset }) as Array<
@@ -230,10 +311,24 @@ export function createTicket(args: {
 	title: string;
 	projectIds: number[];
 	groupId?: number | null;
+	priority?: TicketPriority;
+	/** Required by callers when priority is 'urgent' (see checkUrgentRequest). */
+	priorityReason?: string | null;
 }): number {
+	const priority = args.priority ?? 'normal';
 	const info = db
-		.prepare('INSERT INTO tickets (user_id, title, group_id) VALUES (?, ?, ?)')
-		.run(args.userId, args.title.slice(0, 200), args.groupId ?? null);
+		.prepare(
+			`INSERT INTO tickets (user_id, title, group_id, priority, priority_reason, sla_due_at)
+			 VALUES (?, ?, ?, ?, ?, unixepoch() + ?)`
+		)
+		.run(
+			args.userId,
+			args.title.slice(0, 200),
+			args.groupId ?? null,
+			priority,
+			priority === 'urgent' ? (args.priorityReason ?? null) : null,
+			slaSeconds(priority)
+		);
 	const ticketId = Number(info.lastInsertRowid);
 	const linkStmt = db.prepare(
 		'INSERT OR IGNORE INTO ticket_projects (ticket_id, project_id) VALUES (?, ?)'
@@ -265,17 +360,86 @@ export function setTicketArchived(ticketId: number, archived: boolean): void {
 }
 
 export function setTicketStatus(ticketId: number, status: TicketStatus): void {
+	const before = db.prepare('SELECT status FROM tickets WHERE id = ?').get(ticketId) as
+		| { status: TicketStatus }
+		| undefined;
 	db.prepare('UPDATE tickets SET status = ?, updated_at = unixepoch() WHERE id = ?').run(
 		status,
 		ticketId
 	);
+	// A reopened ticket gets a fresh response target instead of an expired one.
+	if (before?.status === 'closed' && status !== 'closed') restartResponseTarget(ticketId);
 }
 
-export function setTicketPriority(ticketId: number, priority: TicketPriority): void {
-	db.prepare('UPDATE tickets SET priority = ?, updated_at = unixepoch() WHERE id = ?').run(
-		priority,
-		ticketId
-	);
+/**
+ * Changing the priority recomputes the target from the last public message
+ * (or the creation time when there is none): due = that moment + hours(priority).
+ * The reason is kept only for urgent.
+ */
+export function setTicketPriority(
+	ticketId: number,
+	priority: TicketPriority,
+	reason: string | null = null
+): void {
+	db.prepare(
+		`UPDATE tickets
+		 SET priority = ?, priority_reason = ?,
+		     sla_due_at = COALESCE(
+		       (SELECT MAX(m.created_at) FROM messages m
+		         WHERE m.ticket_id = tickets.id AND m.internal = 0 AND m.deleted_at IS NULL),
+		       created_at
+		     ) + ?,
+		     updated_at = unixepoch()
+		 WHERE id = ?`
+	).run(priority, priority === 'urgent' ? reason : null, slaSeconds(priority), ticketId);
+}
+
+export type TicketExtension = {
+	id: number;
+	hours: number;
+	reason: string;
+	previous_due: number;
+	new_due: number;
+	created_at: number;
+	user_email: string | null;
+};
+
+/**
+ * Adds time to the current response target: new due = max(current due, now) + hours,
+ * so an overdue ticket gets a full extra window from now. Returns null when the
+ * ticket is closed or has no target. The request is recorded with its reason.
+ * (A later message restarts the clock as usual: the extension covers this wait.)
+ */
+export function extendTicketTime(
+	ticketId: number,
+	userId: number,
+	hours: number,
+	reason: string
+): { previousDue: number; newDue: number } | null {
+	return db.transaction(() => {
+		const t = db
+			.prepare('SELECT status, sla_due_at FROM tickets WHERE id = ?')
+			.get(ticketId) as { status: TicketStatus; sla_due_at: number | null } | undefined;
+		if (!t || t.status === 'closed' || t.sla_due_at === null) return null;
+		const now = Math.floor(Date.now() / 1000);
+		const newDue = Math.max(t.sla_due_at, now) + hours * 3600;
+		db.prepare('UPDATE tickets SET sla_due_at = ?, updated_at = unixepoch() WHERE id = ?').run(newDue, ticketId);
+		db.prepare(
+			`INSERT INTO ticket_extensions (ticket_id, user_id, hours, reason, previous_due, new_due)
+			 VALUES (?, ?, ?, ?, ?, ?)`
+		).run(ticketId, userId, hours, reason, t.sla_due_at, newDue);
+		return { previousDue: t.sla_due_at, newDue };
+	})();
+}
+
+export function listTicketExtensions(ticketId: number): TicketExtension[] {
+	return db
+		.prepare(
+			`SELECT e.id, e.hours, e.reason, e.previous_due, e.new_due, e.created_at, u.email AS user_email
+			 FROM ticket_extensions e LEFT JOIN users u ON u.id = e.user_id
+			 WHERE e.ticket_id = ? ORDER BY e.id DESC`
+		)
+		.all(ticketId) as TicketExtension[];
 }
 
 // ─── Access control + participants ──────────────────────────────────────────
@@ -431,6 +595,7 @@ export {
 	getTicketProjectNames,
 	resolveProjectNames,
 	listProjects,
+	listActiveProjects,
 	listProjectsForUser,
 	listProjectsWithCounts,
 	createProject,

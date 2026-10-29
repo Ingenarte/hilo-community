@@ -5,6 +5,7 @@
   import { onMount, tick } from 'svelte';
   import { env as pubEnv } from '$env/dynamic/public';
   import InstallButton from '$lib/InstallButton.svelte';
+  import { browserSupportsWebAuthn, signInWithPasskey } from '$lib/passkeyClient';
 
   // Instance identity comes from runtime env so the same code serves any
   // self-hosted deployment (see .env.example: PUBLIC_SUPPORT_EMAIL).
@@ -12,7 +13,7 @@
 
   type Props = {
     form?: { error?: string; email?: string } | null;
-    data: { dynamicEnabled: boolean };
+    data: { dynamicEnabled: boolean; passkeysEnabled: boolean; next: string | null; linkExpired: boolean };
   };
 
   const { form, data }: Props = $props();
@@ -20,6 +21,30 @@
   let submitting = $state(false);
   let emailRef = $state<HTMLInputElement | null>(null);
   let showPassword = $state(false);
+
+  // Passkey sign-in (WebAuthn): offered only where the browser supports it.
+  let passkeySupported = $state(false);
+  let passkeyBusy = $state(false);
+  let passkeyError = $state<string | null>(null);
+  onMount(() => {
+    passkeySupported = data.passkeysEnabled && browserSupportsWebAuthn();
+  });
+  async function useAPasskey() {
+    if (passkeyBusy) return;
+    passkeyBusy = true;
+    passkeyError = null;
+    const result = await signInWithPasskey();
+    if (result.ok) {
+      window.location.assign(data.next ?? '/tickets');
+      return;
+    }
+    passkeyBusy = false;
+    // A cancelled prompt is also what browsers show when this device holds no
+    // passkey for the site, so say what to do next instead of staying silent.
+    passkeyError = result.cancelled
+      ? 'No passkey was used. Try again, or sign in with your password.'
+      : result.error;
+  }
 
   // "What is Hilo?" modal — explains the product to first-time visitors
   // who land on /login with no context.
@@ -60,15 +85,14 @@
       <span class="anim-pulse-glow inline-flex">
         <img src="/favicon.svg" alt="" width="36" height="36"
              fetchpriority="high"
-             style="filter: drop-shadow(0 4px 14px oklch(0.74 0.18 295 / 0.5));" />
+             style="filter: drop-shadow(0 4px 14px var(--accent-line));" />
       </span>
       <div class="flex-1 flex items-center gap-2">
         <h1 class="text-lg font-bold tracking-tight">Sign in to hilo</h1>
         <button
           bind:this={infoBtnRef}
           type="button"
-          class="btn btn-ghost shrink-0"
-          style="height: 28px; width: 28px; padding: 0; border-radius: 999px;"
+          class="btn btn-ghost shrink-0 btn-xs btn-icon btn-round"
           aria-label="What is Hilo?"
           aria-expanded={showAbout}
           title="What is Hilo?"
@@ -91,6 +115,16 @@
       -->
       <InstallButton />
     </header>
+
+    {#if data.linkExpired && !form?.error}
+      <div class="mb-4 rounded-xl px-3 py-2.5 text-sm" role="status" data-testid="link-expired"
+           style="background: oklch(0.8 0.17 80 / 0.1); color: var(--color-warn);">
+        That email link was already used or has expired.
+        {#if data.next}Sign in and we will take you straight to your conversation.{:else}Sign in to continue.{/if}
+      </div>
+    {:else if data.next && !form?.error}
+      <p class="mb-4 text-sm text-muted" data-testid="login-next-hint">Sign in to continue to your page.</p>
+    {/if}
 
     {#if form?.error}
       <div
@@ -136,7 +170,12 @@
       </div>
 
       <div>
-        <label for="fixed" class="label block mb-1.5">Password</label>
+        <div class="flex items-center justify-between mb-1.5">
+          <label for="fixed" class="label">Password</label>
+          <a href="/forgot-password" class="text-xs" style="color: var(--color-accent);">
+            Forgot your password?
+          </a>
+        </div>
         <div class="relative">
           <input
             id="fixed"
@@ -198,8 +237,7 @@
           name="remember"
           type="checkbox"
           checked
-          class="h-5 w-5 rounded border-gray-400/60"
-          style="accent-color: var(--color-accent, oklch(0.74 0.18 295));"
+                    
         />
         <span class="text-sm">Remember me on this device</span>
       </label>
@@ -223,6 +261,36 @@
           </svg>
         {/if}
       </button>
+
+      {#if passkeySupported}
+        <div class="flex items-center gap-3 text-xs text-fainter" aria-hidden="true">
+          <span class="flex-1 h-px" style="background: var(--glass-border);"></span>
+          or
+          <span class="flex-1 h-px" style="background: var(--glass-border);"></span>
+        </div>
+
+        {#if passkeyError}
+          <div class="rounded-xl px-3 py-2.5 text-sm error-bubble" role="alert" data-testid="passkey-error">
+            {passkeyError}
+          </div>
+        {/if}
+
+        <button
+          type="button"
+          class="btn h-11 w-full text-sm"
+          data-testid="passkey-signin"
+          disabled={passkeyBusy || submitting}
+          onclick={useAPasskey}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="8" cy="9" r="4" />
+            <path d="M12 9h9" /><path d="M18 9v4" /><path d="M15 9v3" />
+            <path d="M2 21c0-3.3 2.7-6 6-6" />
+          </svg>
+          {passkeyBusy ? 'Waiting for your device…' : 'Sign in with a passkey'}
+        </button>
+      {/if}
 
       <!-- <p class="text-fainter text-center text-[11px] leading-relaxed mt-1">
         By signing in you accept that this is a low-security guest area.

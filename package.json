@@ -33,7 +33,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "@types/nodemailer": "^6.4.17",
-    "sharp": "^0.34.5",
+    "@types/pdfkit": "^0.17.6",
     "svelte": "^5.36.0",
     "svelte-check": "^4.3.0",
     "tailwindcss": "^4.1.0",
@@ -42,17 +42,18 @@
     "vitest": "^2.1.9"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.0.3",
     "better-sqlite3": "^11.8.0",
+    "docx": "9.9.0",
+    "fflate": "^0.8.3",
     "nodemailer": "^6.9.16",
+    "pdfkit": "^0.20.2",
+    "sharp": "^0.34.5",
     "tus-js-client": "^4.3.1"
   },
   "engines": {
     "node": ">=20.0.0"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild"
-    ]
-  }
+  "packageManager": "pnpm@10.34.6"
 }

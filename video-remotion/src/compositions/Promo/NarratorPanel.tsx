@@ -10,51 +10,52 @@ import {
 } from 'remotion';
 import { ACCENT, CYAN, FONT, VIOLET } from '../../theme';
 
+/** Geometry shared with the scenes so content never sits under the avatar. */
+export const PANEL_WIDTH = 460;
+export const PANEL_RIGHT = 70;
+/** Right padding for scene content so it never sits under the avatar. */
+export const CONTENT_RIGHT_PAD = PANEL_WIDTH + PANEL_RIGHT + 60;
+
+const CLIP = 'heygen/narration.mp4';
+
 /**
- * Placeholder-aware slot for the HeyGen avatar clips.
- *
- * Drop the rendered clips into `video-remotion/public/heygen/{intro,outro}.mp4`
- * and this component plays them; while they are absent it renders a styled
- * "Narrator" card of identical size and duration, so the full promo renders
- * end-to-end today and the timing never shifts when the real clips land.
+ * Persistent narrator panel: the single continuous HeyGen avatar clip
+ * (portrait 1080x1920) plays across the whole promo, mounted OUTSIDE the
+ * <Series> so it never restarts between scenes. When the clip is absent the
+ * panel degrades to a styled placeholder of identical geometry.
  */
-export const HeygenSlot: React.FC<{
-  clip: 'intro' | 'outro';
-  width: number;
-  height: number;
-}> = ({ clip, width, height }) => {
+export const NarratorPanel: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const name = `heygen/${clip}.mp4`;
-  const exists = getStaticFiles().some((f) => f.name === name);
+  const exists = getStaticFiles().some((f) => f.name === CLIP);
 
-  const pop = spring({ frame, fps, config: { damping: 200, mass: 0.7 } });
-  const scale = interpolate(pop, [0, 1], [0.94, 1]);
-
+  const pop = spring({ frame, fps, config: { damping: 200, mass: 0.8 } });
+  const height = 818; // 9:16 card
   const shell: React.CSSProperties = {
-    width,
+    position: 'absolute',
+    right: PANEL_RIGHT,
+    top: (1080 - height) / 2,
+    width: PANEL_WIDTH,
     height,
-    borderRadius: 28,
+    borderRadius: 30,
     overflow: 'hidden',
-    border: `2px solid rgba(255,255,255,0.14)`,
+    border: '2px solid rgba(255,255,255,0.14)',
     boxShadow: `0 30px 90px ${VIOLET}40`,
-    transform: `scale(${scale})`,
     background: '#0c111c',
-    position: 'relative',
+    transform: `scale(${interpolate(pop, [0, 1], [0.95, 1])})`,
   };
 
   if (exists) {
     return (
       <div style={shell}>
         <OffthreadVideo
-          src={staticFile(name)}
+          src={staticFile(CLIP)}
           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
         />
       </div>
     );
   }
 
-  // Narrator placeholder: pulsing avatar silhouette + equalizer bars.
   const bars = Array.from({ length: 5 });
   return (
     <div
@@ -88,19 +89,12 @@ export const HeygenSlot: React.FC<{
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 44 }}>
         {bars.map((_, i) => {
           const h = 12 + Math.abs(Math.sin(frame / 6 + i * 1.1)) * 32;
-          return (
-            <div
-              key={i}
-              style={{ width: 9, height: h, borderRadius: 999, background: ACCENT }}
-            />
-          );
+          return <div key={i} style={{ width: 9, height: h, borderRadius: 999, background: ACCENT }} />;
         })}
       </div>
-      <div style={{ fontSize: 24, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>
-        Narrator
-      </div>
-      <div style={{ fontSize: 16, color: 'rgba(255,255,255,0.45)', fontWeight: 500 }}>
-        drop heygen/{clip}.mp4 into public/
+      <div style={{ fontSize: 24, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>Narrator</div>
+      <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.45)', fontWeight: 500 }}>
+        drop {CLIP} into public/
       </div>
     </div>
   );

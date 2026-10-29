@@ -20,6 +20,7 @@ import { sendWebPushToUser } from './webpush';
 import { broadcastToUser } from './sse';
 import { config } from './env';
 import { log } from './logger';
+import { isTestAccount } from './testAccounts';
 
 type SavedAttachment = {
 	id: number;
@@ -59,6 +60,11 @@ export type FanOutArgs = {
  * the HTTP response the user is waiting for.
  */
 export async function fanOutMessageNotification(args: FanOutArgs): Promise<void> {
+	// Messages written by test accounts (reserved test domain) notify nobody.
+	if (isTestAccount(args.authorEmail)) {
+		log.info('notifications skipped for test account', { ticketId: args.ticketId });
+		return;
+	}
 	const authorEmailLower = args.authorEmail.toLowerCase();
 	const participants = getTicketParticipants(args.ticketId);
 	const seen = new Set(participants.map((p) => p.email.toLowerCase()));

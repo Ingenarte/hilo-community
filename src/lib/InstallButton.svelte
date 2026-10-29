@@ -4,6 +4,10 @@
   import { cubicOut } from 'svelte/easing';
   import { detectStandalone } from '$lib/pwa';
 
+  /** `icon`: compact navbar button. `menu`: row inside a dropdown. */
+  type Props = { variant?: 'icon' | 'menu' };
+  const { variant = 'icon' }: Props = $props();
+
   type BIPEvent = Event & {
     prompt: () => Promise<void>;
     userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
@@ -59,22 +63,39 @@
 </script>
 
 {#if shouldShow}
-  <button
-    type="button"
-    class="btn btn-ghost"
-    style="height:32px;"
-    aria-label="Install Hilo"
-    title="Install Hilo as an app"
-    onclick={() => (bip ? install() : (showIOSGuide = true))}
-  >
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-         stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="7 10 12 15 17 10" />
-      <line x1="12" y1="15" x2="12" y2="3" />
-    </svg>
-    <span class="hidden md:inline ml-1.5 text-xs">Install</span>
-  </button>
+  {#if variant === 'menu'}
+    <button
+      type="button"
+      class="menu-item"
+      role="menuitem"
+      aria-label="Install Hilo"
+      onclick={() => (bip ? install() : (showIOSGuide = true))}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <polyline points="7 10 12 15 17 10" />
+        <line x1="12" y1="15" x2="12" y2="3" />
+      </svg>
+      Install app
+    </button>
+  {:else}
+    <button
+      type="button"
+      class="btn btn-ghost btn-sm"
+      aria-label="Install Hilo"
+      title="Install Hilo as an app"
+      onclick={() => (bip ? install() : (showIOSGuide = true))}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <polyline points="7 10 12 15 17 10" />
+        <line x1="12" y1="15" x2="12" y2="3" />
+      </svg>
+      <span class="hidden md:inline ml-1.5 text-xs">Install</span>
+    </button>
+  {/if}
 {/if}
 
 {#if showIOSGuide}

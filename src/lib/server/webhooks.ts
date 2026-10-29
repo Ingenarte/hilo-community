@@ -10,6 +10,7 @@ import { listWebhooks } from './tickets';
 import { withRetry } from './retry';
 import { log } from './logger';
 import { config } from './env';
+import { isTestAccount } from './testAccounts';
 
 export type WebhookEvent =
 	| 'ticket.new'
@@ -86,6 +87,8 @@ function eventLabel(e: WebhookEvent): string {
 
 export function dispatchWebhooks(event: WebhookEvent, payload: Omit<WebhookPayload, 'event'>) {
 	const full: WebhookPayload = { event, ...payload };
+	// Test accounts never reach Slack/Discord/etc.
+	if (isTestAccount((payload as { author?: string }).author)) return;
 	const hooks = listWebhooks().filter(
 		(h) => h.enabled === 1 && h.events.split(',').map((e) => e.trim()).includes(event)
 	);

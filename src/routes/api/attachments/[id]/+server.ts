@@ -5,8 +5,14 @@ import { Readable } from 'node:stream';
 import { db } from '$lib/server/db';
 import { canAccessTicket, getAttachment } from '$lib/server/tickets';
 import { uploadPath } from '$lib/server/uploads';
+import {
+	RENDITION_MIME,
+	ensureRendition,
+	needsRendition,
+	renditionName
+} from '$lib/server/audioRendition';
 
-export const GET: RequestHandler = ({ params, locals, request }) => {
+export const GET: RequestHandler = async ({ params, locals, request, url }) => {
 	if (!locals.user) throw redirect(303, '/login');
 	const id = Number(params.id);
 	if (!Number.isFinite(id)) throw error(404, 'Not found');
@@ -28,7 +34,22 @@ export const GET: RequestHandler = ({ params, locals, request }) => {
 	if (!row) throw error(404, 'Not found');
 	if (!canAccessTicket(locals.user, row)) throw error(403, 'Forbidden');
 
-	const filePath = uploadPath(att.stored_name);
+	// ?format=m4a: AAC rendition of WebM/Ogg voice messages for browsers (Safari
+	// on iPhone) that cannot play Opus. 404 when none can be made, so the
+	// <audio> element falls back to the original source.
+	let servedName = att.stored_name;
+	let servedMime = att.mime_type || 'application/octet-stream';
+	let servedFilename = att.filename;
+	if (url.searchParams.get('format') === 'm4a') {
+		if (!needsRendition(att.mime_type)) throw error(404, 'No rendition');
+		const made = await ensureRendition(att.stored_name);
+		if (!made) throw error(404, 'No rendition');
+		servedName = renditionName(att.stored_name);
+		servedMime = RENDITION_MIME;
+		servedFilename = att.filename.replace(/\.[^.]*$/, '') + '.m4a';
+	}
+
+	const filePath = uploadPath(servedName);
 	let totalSize = 0;
 	try {
 		totalSize = statSync(filePath).size;
@@ -36,8 +57,8 @@ export const GET: RequestHandler = ({ params, locals, request }) => {
 		throw error(404, 'File missing');
 	}
 
-	const safeName = att.filename.replace(/[^\x20-\x7E]+/g, '_');
-	const mimeType = att.mime_type || 'application/octet-stream';
+	const safeName = servedFilename.replace(/[^\x20-\x7E]+/g, '_');
+	const mimeType = servedMime;
 
 	// ── Range request handling (RFC 7233) ──────────────────────────────────────
 	const rangeHeader = request.headers.get('range');

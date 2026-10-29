@@ -15,6 +15,7 @@
 import { db } from './db';
 import { config } from './env';
 import { log } from './logger';
+import { isTestAccount } from './testAccounts';
 import type { DBOutboxItem } from './db';
 import { getMailer } from './mailer';
 
@@ -89,6 +90,14 @@ export async function drain(): Promise<{ sent: number; failed: number }> {
 }
 
 async function deliver(row: DBOutboxItem): Promise<'ok' | 'fail'> {
+	// Mail for test accounts is never handed to the SMTP server.
+	if (isTestAccount(row.to_email)) {
+		db.prepare(
+			`UPDATE email_outbox SET sent_at = unixepoch(), error = 'skipped: test account' WHERE id = ?`
+		).run(row.id);
+		log.info('mail skipped for test account', { outbox_id: row.id });
+		return 'ok';
+	}
 	let attachments: Array<{ filename: string; path: string; cid?: string; contentType?: string }> = [];
 	try {
 		attachments = JSON.parse(row.attachments_json) as typeof attachments;

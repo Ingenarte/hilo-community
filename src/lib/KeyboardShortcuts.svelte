@@ -4,6 +4,7 @@
   import { page } from '$app/stores';
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
+  import { loadTicketNav, positionIn } from '$lib/ticketNav';
 
   let showCheatsheet = $state(false);
   let activeTab = $state<'shortcuts' | 'manual'>('shortcuts');
@@ -47,6 +48,19 @@
     const idx = links.findIndex((l) => l === document.activeElement);
     const next = links[Math.max(0, Math.min(links.length - 1, idx + delta))] || links[0];
     next.focus();
+  }
+
+  /** On a ticket page, j / k move to the next / previous ticket of the list it was opened from. */
+  function stepOpenTicket(delta: 1 | -1): boolean {
+    const m = /^\/tickets\/(\d+)$/.exec($page.url.pathname);
+    if (!m) return false;
+    // Not while the help sheet, the image viewer or any other dialog is open.
+    if (showCheatsheet || document.querySelector('[role="dialog"]')) return false;
+    const pos = positionIn(loadTicketNav(), Number(m[1]));
+    const target = pos ? (delta === 1 ? pos.next : pos.prev) : null;
+    if (target === null) return false;
+    goto(`/tickets/${target}`, { replaceState: true, noScroll: true });
+    return true;
   }
 
   function openHelp(tab: 'shortcuts' | 'manual' = 'shortcuts') {
@@ -115,9 +129,11 @@
         break;
       case 'j':
         if ($page.url.pathname === '/tickets') { e.preventDefault(); walkTickets(1); }
+        else if (stepOpenTicket(1)) e.preventDefault();
         break;
       case 'k':
         if ($page.url.pathname === '/tickets') { e.preventDefault(); walkTickets(-1); }
+        else if (stepOpenTicket(-1)) e.preventDefault();
         break;
     }
   }
@@ -134,6 +150,7 @@
     ['Inbox: next ticket', 'j'],
     ['Inbox: previous ticket', 'k'],
     ['Inbox: open focused', '↩'],
+    ['Open ticket: next / previous in the list', 'j / k'],
     ['Go to inbox', 'g i'],
     ['Go to settings', 'g s'],
     ['Send message', '⌘/Ctrl + ↩'],
@@ -165,8 +182,7 @@
         </div>
         <button
           type="button"
-          class="btn btn-ghost"
-          style="height:28px; width:28px; padding:0;"
+          class="btn btn-ghost btn-xs btn-icon"
           aria-label="Close help"
           onclick={() => (showCheatsheet = false)}
         >
@@ -255,20 +271,23 @@
           </section>
 
           <section>
-            <h3 class="text-base font-bold mb-1.5">Priority</h3>
+            <h3 class="text-base font-bold mb-1.5">Priority and response time</h3>
             <p class="text-muted leading-relaxed mb-2">
-              Priority is a <strong>sorting + colouring</strong> hint. It does
-              <strong>not</strong> trigger any automatic action (no escalations,
-              no extra emails). It only affects:
+              Every ticket has a priority that sets how soon it should be
+              answered, counted from when the ticket was opened:
             </p>
             <ul class="text-muted leading-relaxed list-disc pl-5 space-y-1">
-              <li>The order tickets appear in the inbox (urgent → high → normal → low).</li>
-              <li>The colour of the priority chip on the row.</li>
-              <li>An optional visual cue for triage; treat it as a label.</li>
+              <li><strong>Urgent</strong>: 24 hours (red). Needs a written reason and a confirmation.</li>
+              <li><strong>High</strong>: 48 hours (amber).</li>
+              <li><strong>Normal</strong>: 72 hours. This is the default.</li>
+              <li><strong>Low</strong>: 96 hours (blue).</li>
             </ul>
             <p class="text-muted leading-relaxed mt-2">
-              Admins change the priority from the ticket detail sidebar. The
-              dropdown saves immediately — no Save button.
+              The <strong>Queue</strong> page lists every open ticket you can
+              see, soonest deadline first. Anyone who can open a ticket can
+              change its priority from the ticket sidebar; the dropdown saves
+              immediately and restarts the target from the opening time.
+              Priority does not send any automatic email.
             </p>
           </section>
 

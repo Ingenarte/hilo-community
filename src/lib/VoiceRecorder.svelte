@@ -31,20 +31,40 @@
     blob: Blob;
     mimeType: string;
     durationMs: number;
+    /** True when the user pressed the round send button of the compact bar. */
+    send?: boolean;
   };
 
   type Props = {
     onrecorded: (payload: RecordedPayload) => void;
     oncancel: () => void;
+    /**
+     * Compact chat-app bar (trash, red dot + timer + level, round send button)
+     * used on phones. It starts recording as soon as `start()` is called by
+     * the parent, and its send button stops the recording and asks the parent
+     * to send it straight away.
+     */
+    bar?: boolean;
   };
 
-  const { onrecorded, oncancel }: Props = $props();
+  const { onrecorded, oncancel, bar = false }: Props = $props();
+
+  /** Begin recording (called by the parent from the tap that opened the bar). */
+  export function start(): Promise<void> {
+    return startRecording();
+  }
 
   // ── state ──────────────────────────────────────────────────────────────────
   let recording = $state(false);
   let startedAt = $state(0);
   let elapsed = $state(0);            // ms since recording started
-  let showSafariHint = $state(false);
+  /** True while the microphone delivers nothing but digital silence. */
+  let silentWarning = $state(false);
+  let peakRms = 0;
+  const isIOS = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const silentMessage = isIOS
+    ? 'No sound detected. On iPhone, allow the microphone for this site (or open Hilo in Safari), then try again.'
+    : 'No sound detected. Check that your microphone is on, allowed for this site and selected as the input device.';
   /**
    * Human-readable explanation surfaced when getUserMedia or MediaRecorder
    * setup throws. Previously this branch was a silent `catch {}` — the
@@ -56,6 +76,7 @@
   // ── refs (not reactive — just DOM nodes and mutable objects) ──────────────
   let canvasEl: HTMLCanvasElement | null = $state(null);
 
+  let sendAfter = false;
   let recorder: MediaRecorder | null = null;
   let stream: MediaStream | null = null;
   let audioCtx: AudioContext | null = null;
@@ -96,9 +117,18 @@
 
   function drawMeter() {
     rafId = requestAnimationFrame(drawMeter);
-    if (!canvasEl || !analyser) return;
+    if (!analyser) return;
     const data = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteTimeDomainData(data);
+
+    // Loudest level seen so far, used to warn about a muted microphone.
+    let peakSumSq = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i] - 128) / 128;
+      peakSumSq += v * v;
+    }
+    peakRms = Math.max(peakRms, Math.sqrt(peakSumSq / data.length));
+    if (!canvasEl) return;
 
     const ctx2d = canvasEl.getContext('2d');
     if (!ctx2d) return;
@@ -148,31 +178,28 @@
     }
   }
 
-  // ── iOS silent-track detector ─────────────────────────────────────────────
+  // ── silent-microphone detector ─────────────────────────────────────────────
+  // A muted, blocked or wrongly selected microphone still records, but only
+  // digital silence. After 1.5 s with nothing above the noise floor we say so
+  // (it clears by itself if sound arrives), so nobody sends an empty message.
 
   function scheduleSilenceCheck() {
-    silenceCheckTimer = setTimeout(() => {
-      if (!analyser) return;
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      analyser.getByteTimeDomainData(data);
-      let sumSq = 0;
-      for (let i = 0; i < data.length; i++) {
-        const v = (data[i] - 128) / 128;
-        sumSq += v * v;
-      }
-      const rms = Math.sqrt(sumSq / data.length);
-      if (rms < 0.001) {
-        // Third-party iOS browser returning a silent track.
-        showSafariHint = true;
-      }
-    }, 500);
+    peakRms = 0;
+    silentWarning = false;
+    silenceCheckTimer = setInterval(() => {
+      if (!analyser || !recording) return;
+      // A suspended audio context (iOS) reads as silence: do not warn then.
+      if (audioCtx?.state !== 'running') return;
+      silentWarning = Date.now() - startedAt > 1500 && peakRms < 0.0005;
+    }, 500) as unknown as ReturnType<typeof setTimeout>;
   }
 
   // ── recording lifecycle ───────────────────────────────────────────────────
 
   async function startRecording() {
-    showSafariHint = false;
+    silentWarning = false;
     errorMsg = null;
+    sendAfter = false;
     chunks = [];
     mimeType = pickMime();
 
@@ -213,7 +240,7 @@
       const durationMs = Date.now() - startedAt;
       const blob = new Blob(chunks, { type: mimeType || 'audio/webm' });
       teardown();
-      onrecorded({ blob, mimeType: mimeType || 'audio/webm', durationMs });
+      onrecorded({ blob, mimeType: mimeType || 'audio/webm', durationMs, send: sendAfter });
     };
 
     recorder.start(1000); // 1-second chunks
@@ -231,11 +258,16 @@
     }, MAX_DURATION_MS);
   }
 
+  function stopAndSend() {
+    sendAfter = true;
+    stopRecording();
+  }
+
   function stopRecording() {
     if (!recorder || recorder.state === 'inactive') return;
     if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
     if (maxTimer) { clearTimeout(maxTimer); maxTimer = null; }
-    if (silenceCheckTimer) { clearTimeout(silenceCheckTimer); silenceCheckTimer = null; }
+    if (silenceCheckTimer) { clearInterval(silenceCheckTimer); silenceCheckTimer = null; }
     recording = false;
     recorder.stop(); // triggers onstop async
   }
@@ -249,7 +281,7 @@
     }
     if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
     if (maxTimer) { clearTimeout(maxTimer); maxTimer = null; }
-    if (silenceCheckTimer) { clearTimeout(silenceCheckTimer); silenceCheckTimer = null; }
+    if (silenceCheckTimer) { clearInterval(silenceCheckTimer); silenceCheckTimer = null; }
     teardown();
     oncancel();
   }
@@ -281,6 +313,71 @@
   });
 </script>
 
+{#if bar}
+  <div class="flex flex-col gap-1.5" data-testid="voice-bar">
+    <div class="flex items-center gap-2">
+      <button
+        type="button"
+        class="btn btn-ghost shrink-0 btn-xl btn-icon btn-round"
+        onclick={cancel}
+        aria-label="Cancel recording"
+        data-testid="voice-cancel"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+          <path d="M10 11v6M14 11v6" />
+          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+        </svg>
+      </button>
+
+      <div
+        class="flex-1 min-w-0 flex items-center gap-2.5 px-4"
+        style="height:44px; border-radius:9999px; border:1px solid var(--glass-border); background: oklch(0 0 0 / 0.2);"
+      >
+        {#if recording}
+          <span class="shrink-0 rounded-full animate-pulse" style="width:10px; height:10px; background: oklch(0.65 0.24 25);" aria-hidden="true"></span>
+          <span class="font-mono text-[15px] tabular-nums" aria-live="polite" aria-label="Recording duration" data-testid="voice-timer">
+            {formatDuration(elapsed)}
+          </span>
+          {#if elapsed >= MAX_DURATION_MS - 5000}
+            <span class="text-xs" style="color: var(--color-warn);" aria-live="assertive">max</span>
+          {/if}
+          <canvas bind:this={canvasEl} width="96" height="38" class="ml-auto shrink-0" aria-hidden="true"></canvas>
+        {:else if errorMsg}
+          <span class="text-xs truncate" style="color: var(--color-danger);">Could not record</span>
+        {:else}
+          <span class="text-sm text-muted">Starting the microphone…</span>
+        {/if}
+      </div>
+
+      <button
+        type="button"
+        class="btn btn-primary shrink-0 btn-xl btn-icon btn-round"
+        onclick={stopAndSend}
+        disabled={!recording}
+        aria-label="Send voice message"
+        data-testid="voice-send"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="22" y1="2" x2="11" y2="13" />
+          <polygon points="22 2 15 22 11 13 2 9 22 2" />
+        </svg>
+      </button>
+    </div>
+
+    {#if silentWarning}
+      <p class="text-xs px-1" style="color: var(--color-warn);" role="alert" data-testid="voice-silent-warning">
+        {silentMessage}
+      </p>
+    {/if}
+    {#if errorMsg}
+      <p class="text-xs px-1" style="color: var(--color-danger);" role="alert">{errorMsg}</p>
+    {/if}
+  </div>
+{:else}
 <div class="flex flex-col gap-2">
   <div class="flex items-center gap-2">
     {#if !recording}
@@ -288,7 +385,6 @@
       <button
         type="button"
         class="btn btn-primary"
-        style="height:38px;"
         onclick={startRecording}
         aria-label="Start recording"
       >
@@ -325,7 +421,6 @@
       <button
         type="button"
         class="btn btn-primary"
-        style="height:38px;"
         onclick={stopRecording}
         aria-label="Stop recording and attach"
       >
@@ -339,8 +434,7 @@
       <!-- Cancel / discard button -->
       <button
         type="button"
-        class="btn btn-ghost"
-        style="height:38px; width:38px; padding:0;"
+        class="btn btn-ghost btn-icon"
         onclick={cancel}
         aria-label="Cancel recording"
       >
@@ -352,10 +446,9 @@
     {/if}
   </div>
 
-  {#if showSafariHint}
-    <p class="text-xs" style="color: var(--color-warn);">
-      No audio detected. On iOS, third-party browsers (Chrome, Firefox) cannot access the microphone.
-      Please open this page in <strong>Safari</strong> to send voice messages.
+  {#if silentWarning}
+    <p class="text-xs" style="color: var(--color-warn);" role="alert" data-testid="voice-silent-warning">
+      {silentMessage}
     </p>
   {/if}
 
@@ -365,3 +458,4 @@
     </p>
   {/if}
 </div>
+{/if}

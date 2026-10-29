@@ -105,7 +105,7 @@
     variant === 'danger'
       ? 'background: oklch(0.7 0.22 25 / 0.12); color: var(--color-danger);'
       : variant === 'primary'
-        ? 'background: oklch(0.52 0.14 240 / 0.14); color: oklch(0.65 0.14 240);'
+        ? 'background: var(--accent-wash-strong); color: var(--color-accent);'
         : 'background: var(--glass-tint); color: var(--color-muted);'
   );
 </script>

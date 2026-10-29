@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invalidateAll } from '$app/navigation';
+  import { afterNavigate, invalidateAll, pushState } from '$app/navigation';
   import { onMount, onDestroy, tick } from 'svelte';
   import { fly, scale, fade } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
@@ -17,6 +17,11 @@
   import TypingIndicator from '$lib/TypingIndicator.svelte';
   import Composer from '$lib/Composer.svelte';
   import TicketSidebar from '$lib/TicketSidebar.svelte';
+  import ImageLightbox from '$lib/ImageLightbox.svelte';
+  import { loadTicketNav, positionIn } from '$lib/ticketNav';
+  import { needsRendition } from '$lib/audioFormats';
+  import ExtendTimeModal from '$lib/ExtendTimeModal.svelte';
+  import { formatRemaining, slaTone } from '$lib/sla';
 
   // Mirrors `DBAttachment` from `src/lib/server/db.ts` — the server
   // streams DB rows through to the page as-is, so we read the snake_case
@@ -31,6 +36,7 @@
     mime_type: string;
     size_bytes: number;
     stored_name?: string;
+    silent?: number | null;
     cid?: string;
     transcript_status: TranscriptStatus | null;
     transcript_text: string | null;
@@ -48,6 +54,7 @@
     edited_at: number | null;
     deleted_at: number | null;
     internal: 0 | 1;
+    via_token_id: number | null;
     attachments: Attachment[];
     reactions: Reaction[];
     replied_to: RepliedToPreview | null;
@@ -58,6 +65,8 @@
     title: string;
     status: 'open' | 'pending' | 'closed';
     priority: 'urgent' | 'high' | 'normal' | 'low';
+    priority_reason: string | null;
+    sla_due_at: number | null;
     user_id: number;
     user_email: string;
     assigned_to: number | null;
@@ -86,6 +95,18 @@
     completed_by_email: string | null;
   };
 
+  // Back target: the list the user came from (inbox with its filters, Queue
+  // or Gantt); /tickets when the ticket was opened directly or from another ticket.
+  let backHref = $state('/tickets');
+  let backLabel = $state('Back to inbox');
+  afterNavigate(({ from }) => {
+    const p = from?.url.pathname;
+    if (p === '/tickets' || p === '/queue' || p === '/gantt') {
+      backHref = p + (from?.url.search ?? '');
+      backLabel = p === '/queue' ? 'Back to queue' : p === '/gantt' ? 'Back to Gantt' : 'Back to inbox';
+    }
+  });
+
   type Props = {
     data: {
       ticket: Ticket;
@@ -98,12 +119,57 @@
       participants: Participant[];
       participantReads: ReadReceipt[];
       tasks: Task[];
+      extensions: Array<{ id: number; hours: number; reason: string; created_at: number; user_email: string | null }>;
       isAdmin: boolean;
       currentUserId: number;
     };
   };
 
   const { data }: Props = $props();
+
+  // Previous / next ticket within the list the user came from (inbox with its
+  // filters, Queue or Gantt). Hidden when the ticket was opened directly.
+  const SOURCE_LABEL = { inbox: 'Back to inbox', queue: 'Back to queue', gantt: 'Back to Gantt' } as const;
+  let listNav = $state(loadTicketNav());
+  const pos = $derived(positionIn(listNav, data.ticket.id));
+  $effect(() => {
+    void data.ticket.id;
+    listNav = loadTicketNav();
+  });
+  $effect(() => {
+    // The stored list also tells where "back" leads, even after prev/next.
+    if (listNav && pos) {
+      backHref = listNav.href;
+      backLabel = SOURCE_LABEL[listNav.source];
+    }
+  });
+
+  // ── Extend the response time (reason required, like marking a ticket urgent) ──
+  let extendOpen = $state(false);
+  let extendBusy = $state(false);
+  let extendError = $state<string | null>(null);
+  let extendForm = $state<HTMLFormElement | null>(null);
+  let extendHours = $state('24');
+  let extendReason = $state('');
+  let slaNow = $state(Math.floor(Date.now() / 1000));
+  onMount(() => {
+    const t = setInterval(() => (slaNow = Math.floor(Date.now() / 1000)), 30_000);
+    return () => clearInterval(t);
+  });
+  const canExtend = $derived(data.ticket.status !== 'closed' && data.ticket.sla_due_at != null);
+  const slaText = $derived(formatRemaining(data.ticket.sla_due_at, slaNow));
+  const slaToneNow = $derived(slaTone(data.ticket.sla_due_at, data.ticket.priority, slaNow));
+  function openExtend() {
+    extendError = null;
+    extendOpen = true;
+  }
+  function confirmExtend(hours: number, reason: string) {
+    extendHours = String(hours);
+    extendReason = reason;
+    extendError = null;
+    // Let the hidden inputs pick up the values before the form serialises.
+    queueMicrotask(() => extendForm?.requestSubmit());
+  }
 
   /**
    * ID of the viewer's last own (non-deleted) message in the timeline.
@@ -282,6 +348,7 @@
     // A transcript finished (or failed) — reload so audio attachments
     // show the updated transcript text / status.
     es.addEventListener('transcription', () => { invalidateAll(); });
+    es.addEventListener('attachment', () => { invalidateAll(); });
     es.onerror = () => {
       live = false;
       es?.close();
@@ -337,6 +404,13 @@
         }
         if (res.status === 413) {
           throw new Error('That file is larger than the server allows. Try a smaller one.');
+        }
+        if (res.status === 409 && text.includes('ticket_closed')) {
+          // The ticket was closed while this page was open: show the closed state.
+          await invalidateAll();
+          throw new Error(
+            'This ticket was closed, so your message was not sent. Open a new ticket if you need something else.'
+          );
         }
         throw new Error(text || `Send failed with status ${res.status}`);
       }
@@ -399,11 +473,16 @@
   // ---- sidebar mutations ------------------------------------------------
 
   async function assignTo(adminUserId: number | null) {
-    await fetch(`/api/tickets/${data.ticket.id}/assign`, {
+    const res = await fetch(`/api/tickets/${data.ticket.id}/assign`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ adminUserId })
     });
+    if (!res.ok) {
+      // Surface the refusal instead of silently reverting on the next reload.
+      const payload = await res.json().catch(() => ({}));
+      error = (payload as { error?: string }).error ?? 'Could not assign the ticket.';
+    }
     await invalidateAll();
   }
 
@@ -659,6 +738,31 @@
 
   // Mobile info drawer (sidebar accessible below lg breakpoint)
   let infoOpen = $state(false);
+
+  // Image viewer. Visibility lives in local state, NOT in `$page.state`:
+  // `invalidateAll()` (mark-as-read timer, SSE refreshes, manual refresh)
+  // resets SvelteKit's page state by default, which used to close the modal
+  // about 1.8 s after the ticket opened. A shallow history entry is still
+  // pushed so the device Back button closes the viewer instead of leaving the
+  // ticket; `popstate` is the only thing that closes it from history.
+  let lightbox = $state<{ src: string; alt: string } | null>(null);
+  let lightboxEntry = false;
+  function openLightbox(src: string, alt: string) {
+    lightbox = { src, alt };
+    pushState('', { lightbox: true });
+    lightboxEntry = true;
+  }
+  function closeLightbox() {
+    lightbox = null;
+    if (lightboxEntry) {
+      lightboxEntry = false;
+      history.back();
+    }
+  }
+  function onPopState() {
+    lightboxEntry = false;
+    lightbox = null;
+  }
 </script>
 
 <svelte:head>
@@ -679,11 +783,27 @@
       in:scale={{ start: 0.99, duration: 320, easing: cubicOut, opacity: 0 }}
     >
       <!-- A) Header -->
-      <header class="px-5 py-4 flex items-start gap-3"
+      <header class="px-4 sm:px-5 py-3 sm:py-4 flex flex-wrap sm:flex-nowrap items-start gap-3 max-sm:gap-y-2"
               style="border-bottom: 1px solid var(--glass-border);">
-        <div class="flex-1 min-w-0">
-          <div class="flex flex-wrap items-center gap-2 mb-2">
-            <span class="font-mono text-fainter text-[11px]">#{data.ticket.id}</span>
+        <!-- Shown at every width; the navbar hides its own chevron on ticket pages. -->
+        <a
+          href={backHref}
+          class="btn btn-ghost inline-flex shrink-0 -ml-2 max-sm:order-1 btn-lg btn-icon"
+          aria-label={backLabel}
+          title={backLabel}
+          data-testid="ticket-back"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </a>
+        <!-- On phones this wrapper disappears (display: contents) so the chips row,
+             the title and the owner line become rows of the header itself. -->
+        <div class="flex-1 min-w-0 max-sm:contents">
+          <div class="flex flex-wrap items-center gap-2 mb-2 max-sm:order-2 max-sm:flex-1 max-sm:min-w-0 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:mb-0 max-sm:[&>*]:shrink-0 max-sm:whitespace-nowrap"
+               style="scrollbar-width: none;">
+            <span class="num text-fainter text-[11px]">#{data.ticket.id}</span>
             <span class="chip chip-{data.ticket.status}">
               <span class="inline-block w-1.5 h-1.5 rounded-full" style="background: currentColor;"></span>
               {data.ticket.status}
@@ -691,8 +811,20 @@
             {#if data.ticket.priority !== 'normal'}
               <span class="chip chip-{data.ticket.priority}">{data.ticket.priority}</span>
             {/if}
+            {#if canExtend}
+              <!-- The countdown doubles as the shortcut to ask for more time (phones and desktop). -->
+              <button type="button" class="chip sla-{slaToneNow} cursor-pointer max-sm:min-h-9 max-sm:px-3" onclick={openExtend}
+                      title="Extend time" aria-label={`Response time: ${slaText}. Extend time`}
+                      data-testid="sla-chip">
+                {slaText}
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+            {/if}
             {#each data.projects as p}
-              <span class="chip chip-project">{p.name}</span>
+              <span class="chip chip-project max-w-[70vw] sm:max-w-xs truncate" title={p.name}>{p.name}</span>
             {/each}
             {#if live}
               <span class="chip chip-live" style="border-radius: 999px;">
@@ -702,18 +834,81 @@
             {/if}
           </div>
 
-          <h1 class="text-lg font-bold tracking-tight truncate">{data.ticket.title}</h1>
+          <h1 class="text-lg font-bold tracking-tight truncate max-sm:order-5 max-sm:basis-full max-sm:whitespace-normal max-sm:line-clamp-2 max-sm:leading-snug">{data.ticket.title}</h1>
 
           {#if data.isAdmin && owner}
-            <div class="text-fainter text-xs mt-0.5">from {owner.email}</div>
+            <div class="text-fainter text-xs mt-0.5 max-sm:order-6 max-sm:basis-full max-sm:mt-0">from {owner.email}</div>
           {/if}
         </div>
+
+        <!-- Previous / next ticket in the list the user came from -->
+        {#if pos && pos.total > 1}
+          <!-- Phones: its own full-width row under the title so the title keeps its width. -->
+          <div class="flex items-center shrink-0 -mx-1 max-sm:order-last max-sm:basis-full max-sm:mx-0 max-sm:justify-between max-sm:border-t max-sm:pt-2"
+               style="border-color: var(--glass-border);" data-testid="ticket-pager">
+            {#if pos.prev !== null}
+              <a
+                href={`/tickets/${pos.prev}`}
+                data-sveltekit-replacestate
+                data-sveltekit-noscroll
+                class="btn btn-ghost w-9 max-sm:w-auto max-sm:px-3 max-sm:gap-1.5"
+                style="height:40px; padding:0;"
+                aria-label="Previous ticket"
+                title="Previous ticket (k)"
+                data-testid="ticket-prev"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="18 15 12 9 6 15" />
+                </svg>
+                <span class="sm:hidden text-sm">Previous</span>
+              </a>
+            {:else}
+              <span class="btn btn-ghost w-9 max-sm:w-auto max-sm:px-3 max-sm:gap-1.5" aria-disabled="true" data-testid="ticket-prev-disabled"
+                    style="height:40px; padding:0; opacity:.3; pointer-events:none;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="18 15 12 9 6 15" />
+                </svg>
+                <span class="sm:hidden text-sm">Previous</span>
+              </span>
+            {/if}
+            <span class="text-[11px] max-sm:text-xs text-fainter num px-0.5"
+                  data-testid="ticket-position" aria-live="polite">{pos.index} / {pos.total}</span>
+            {#if pos.next !== null}
+              <a
+                href={`/tickets/${pos.next}`}
+                data-sveltekit-replacestate
+                data-sveltekit-noscroll
+                class="btn btn-ghost w-9 max-sm:w-auto max-sm:px-3 max-sm:gap-1.5"
+                style="height:40px; padding:0;"
+                aria-label="Next ticket"
+                title="Next ticket (j)"
+                data-testid="ticket-next"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+                <span class="sm:hidden text-sm">Next</span>
+              </a>
+            {:else}
+              <span class="btn btn-ghost w-9 max-sm:w-auto max-sm:px-3 max-sm:gap-1.5" aria-disabled="true" data-testid="ticket-next-disabled"
+                    style="height:40px; padding:0; opacity:.3; pointer-events:none;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+                <span class="sm:hidden text-sm">Next</span>
+              </span>
+            {/if}
+          </div>
+        {/if}
 
         <!-- Info button: only visible below lg (sidebar becomes a drawer) -->
         <button
           type="button"
-          class="lg:hidden btn btn-ghost shrink-0"
-          style="height:40px; width:40px; padding:0;"
+          class="lg:hidden btn btn-ghost shrink-0 max-sm:order-3 btn-lg btn-icon"
           aria-label="Show ticket info"
           aria-expanded={infoOpen}
           onclick={() => (infoOpen = true)}
@@ -726,12 +921,15 @@
           </svg>
         </button>
 
-        <form method="POST" use:enhance
-              action={data.ticket.status === 'closed' ? '?/reopen' : '?/close'}>
-          <button type="submit" class="btn btn-ghost shrink-0" style="height:36px;">
-            {data.ticket.status === 'closed' ? 'Reopen' : 'Close'}
-          </button>
-        </form>
+        <!-- Only an administrator reopens a closed ticket. -->
+        {#if data.ticket.status !== 'closed' || data.isAdmin}
+          <form method="POST" use:enhance class="max-sm:order-4"
+                action={data.ticket.status === 'closed' ? '?/reopen' : '?/close'}>
+            <button type="submit" class="btn btn-ghost shrink-0" data-testid="close-reopen">
+              {data.ticket.status === 'closed' ? 'Reopen' : 'Close'}
+            </button>
+          </form>
+        {/if}
       </header>
 
       <!-- B) Messages list -->
@@ -769,7 +967,10 @@
               <span class={m.sender_role === 'admin' ? 'text-accent font-semibold' : 'sender-user font-semibold'}>
                 {m.sender_role === 'admin' ? 'Admin' : m.sender_email}
               </span>
-              <span class="text-fainter font-mono">{shortTime(m.created_at)}</span>
+              {#if m.via_token_id}
+                <span class="chip" title="Written by an agent using an API token" data-testid="agent-chip">agent</span>
+              {/if}
+              <span class="text-fainter num">{shortTime(m.created_at)}</span>
               {#if m.edited_at}
                 <span class="text-[10px] text-fainter">edited</span>
               {/if}
@@ -792,8 +993,8 @@
                     rows="3"
                   ></textarea>
                   <div class="flex justify-end gap-2">
-                    <button type="button" class="btn btn-ghost" style="height:28px;" onclick={cancelEdit}>Cancel</button>
-                    <button type="button" class="btn btn-primary" style="height:28px;" onclick={saveEdit}>Save</button>
+                    <button type="button" class="btn btn-ghost btn-xs" onclick={cancelEdit}>Cancel</button>
+                    <button type="button" class="btn btn-primary btn-xs" onclick={saveEdit}>Save</button>
                   </div>
                 </div>
               {:else}
@@ -805,7 +1006,7 @@
                     <!-- Quoted reply preview: click scrolls + flashes the original message -->
                     <button type="button"
                             class="block w-full text-left mb-2 px-2 py-1.5 rounded border-l-4 text-xs"
-                            style="border-color: var(--color-accent); background: oklch(0.74 0.18 295 / 0.06);"
+                            style="border-color: var(--color-accent); background: var(--accent-wash);"
                             onclick={() => scrollToMessage(m.replied_to!.id)}
                             aria-label="Jump to replied message">
                       <div class="text-fainter mb-0.5">↩ {m.replied_to.sender_email}</div>
@@ -818,26 +1019,42 @@
                     <div class="mt-2 space-y-2">
                       {#each m.attachments as a}
                         {#if isImage(a.mime_type)}
-                          <a href={`/api/attachments/${a.id}`} target="_blank" rel="noopener"
-                             aria-label={`Open ${a.filename}`}>
+                          <button type="button" class="block p-0 border-0 bg-transparent cursor-zoom-in text-left"
+                                  aria-label={`Open ${a.filename}`}
+                                  onclick={() => openLightbox(`/api/attachments/${a.id}`, a.filename)}>
                             <img src={`/api/attachments/${a.id}`} alt={a.filename}
                                  loading="lazy" decoding="async"
-                                 class="max-h-72 max-w-xs rounded-xl border block"
+                                 class="max-h-72 max-w-full sm:max-w-xs rounded-xl border block"
                                  style="border-color: var(--glass-border);" />
-                          </a>
+                          </button>
                         {:else if isAudio(a.mime_type)}
                           <!-- Voice message: native <audio> controls + Transcribe button. -->
                           <div class="flex flex-col gap-1.5">
                             <audio
                               controls
                               preload="metadata"
-                              src={`/api/attachments/${a.id}`}
-                              class="block max-w-xs"
+                              class="block"
+                              style="width: min(20rem, calc(100vw - 7rem)); max-width: 100%;"
                               aria-label={`Voice message: ${a.filename}`}
                             >
+                              <!-- WebM/Ogg voice messages also have an AAC rendition: it plays
+                                   everywhere, Opus does not on iPhone. -->
+                              {#if needsRendition(a.mime_type)}
+                                <source src={`/api/attachments/${a.id}?format=m4a`} type="audio/mp4" />
+                              {/if}
+                              <source src={`/api/attachments/${a.id}`} type={a.mime_type} />
                               Your browser cannot play this audio file.
                             </audio>
-                            <span class="text-fainter font-mono text-[10px]">{fmtBytes(a.size_bytes)}</span>
+                            <span class="text-fainter num text-[10px]">{fmtBytes(a.size_bytes)}</span>
+
+                            {#if a.silent === 1}
+                              <!-- The recording holds no sound at all (muted or wrong microphone). -->
+                              <p class="text-xs rounded-lg px-2.5 py-1.5" role="note" data-testid="silent-audio"
+                                 style="color: var(--color-warn); background: oklch(0.8 0.17 80 / 0.1);">
+                                No sound was captured in this recording, so there is nothing to hear.
+                                Ask the sender to check their microphone and record it again.
+                              </p>
+                            {/if}
 
                             <!-- Transcription section -->
                             {#if a.transcript_status === 'ready' && a.transcript_text}
@@ -847,7 +1064,7 @@
                                          style="color: var(--color-accent);">
                                   Transcript
                                   {#if a.transcript_lang && a.transcript_lang !== 'auto'}
-                                    <span class="text-fainter font-mono ml-1">({a.transcript_lang})</span>
+                                    <span class="text-fainter ml-1">({a.transcript_lang})</span>
                                   {/if}
                                 </summary>
                                 <p class="px-2.5 pb-2 text-muted leading-relaxed">{a.transcript_text}</p>
@@ -919,7 +1136,7 @@
                             >
                               Your browser cannot play this video file.
                             </video>
-                            <div class="flex items-center gap-2 text-fainter font-mono text-[10px]">
+                            <div class="flex items-center gap-2 text-fainter num text-[10px]">
                               <span>{a.filename}</span>
                               <span>·</span>
                               <span>{fmtBytes(a.size_bytes)}</span>
@@ -938,7 +1155,7 @@
                               <line x1="12" y1="15" x2="12" y2="3" />
                             </svg>
                             <span class="font-medium">{a.filename}</span>
-                            <span class="text-fainter font-mono">{fmtBytes(a.size_bytes)}</span>
+                            <span class="text-fainter num">{fmtBytes(a.size_bytes)}</span>
                           </a>
                         {/if}
                       {/each}
@@ -952,12 +1169,12 @@
                           type="button"
                           class="chip h-6"
                           style={r.mine
-                            ? 'background: oklch(0.74 0.18 295 / 0.18); border-color: oklch(0.74 0.18 295 / 0.4); color: var(--color-text);'
+                            ? 'background: var(--accent-wash-strong); border-color: var(--accent-line); color: var(--color-text);'
                             : ''}
                           onclick={() => react(m.id, r.emoji)}
                         >
                           <span>{r.emoji}</span>
-                          <span class="font-mono">{r.count}</span>
+                          <span class="num">{r.count}</span>
                         </button>
                       {/each}
                     </div>
@@ -976,9 +1193,9 @@
 
                 <!-- message actions: hover on desktop (absolute overlay), always visible on touch (inline below bubble) -->
                 <div class="msg-actions flex gap-1 {isMine(m) ? 'justify-end' : 'justify-start'}">
-                  <!-- Reply button — available on all non-deleted messages -->
-                  {#if !m.deleted_at}
-                    <button type="button" class="btn btn-ghost glass-strong" style="height:36px; width:36px; padding:0;"
+                  <!-- Reply button — available on all non-deleted messages (not to users on a closed ticket) -->
+                  {#if !m.deleted_at && !(data.ticket.status === 'closed' && !data.isAdmin)}
+                    <button type="button" class="btn btn-ghost glass-strong btn-icon"
                             aria-label="Reply to message" onclick={() => startReply(m)}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -987,7 +1204,7 @@
                       </svg>
                     </button>
                   {/if}
-                  <button type="button" class="btn btn-ghost glass-strong" style="height:36px; width:36px; padding:0;"
+                  <button type="button" class="btn btn-ghost glass-strong btn-icon"
                           aria-label="React" onclick={() => (showReactionsFor = showReactionsFor === m.id ? null : m.id)}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -996,8 +1213,8 @@
                       <line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" />
                     </svg>
                   </button>
-                  {#if isMine(m)}
-                    <button type="button" class="btn btn-ghost glass-strong" style="height:36px; width:36px; padding:0;"
+                  {#if isMine(m) && !(data.ticket.status === 'closed' && !data.isAdmin)}
+                    <button type="button" class="btn btn-ghost glass-strong btn-icon"
                             aria-label="Edit" onclick={() => startEdit(m)}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1005,7 +1222,7 @@
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                       </svg>
                     </button>
-                    <button type="button" class="btn btn-ghost glass-strong" style="height:36px; width:36px; padding:0;"
+                    <button type="button" class="btn btn-ghost glass-strong btn-icon"
                             aria-label="Delete" onclick={() => deleteMessage(m.id)}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1062,7 +1279,7 @@
                   {#each reads as r, i}
                     <span class="inline-flex items-center gap-1">
                       <span style="color: var(--color-text); opacity: 0.85;">{readerLabel(r.email)}</span>
-                      <span class="font-mono opacity-70">· {shortTime(r.last_read_at)}</span>
+                      <span class="num opacity-70">· {shortTime(r.last_read_at)}</span>
                     </span>
                     {#if i < reads.length - 1}<span class="opacity-50">,</span>{/if}
                   {/each}
@@ -1080,6 +1297,29 @@
       <!-- C) Composer · padding-bottom respects iPhone home indicator inset -->
       <div bind:this={composerRef}
            style="padding-bottom: env(safe-area-inset-bottom, 0px);">
+        {#if data.ticket.status === 'closed' && !data.isAdmin}
+          <!-- Closed tickets take no replies from users; an administrator reviews and reopens. -->
+          <div class="border-t p-4 flex flex-wrap items-center gap-3" style="border-color: var(--glass-border);"
+               role="status" data-testid="closed-notice">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                 class="shrink-0" style="color: var(--color-muted);">
+              <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <p class="text-sm text-muted flex-1 min-w-[200px]">
+              This ticket is closed, so replies are off. Only an administrator can reopen it.
+              If you need something else, open a new ticket.
+            </p>
+            <a href="/tickets/new" class="btn btn-primary" data-testid="closed-new-ticket">
+              Open a new ticket
+            </a>
+            {#if error}
+              <!-- e.g. a send that was refused because the ticket got closed meanwhile -->
+              <p class="basis-full text-sm" style="color: var(--color-danger);" role="alert"
+                 data-testid="closed-send-error">{error}</p>
+            {/if}
+          </div>
+        {:else}
         <Composer
           bind:body
           bind:pendingFiles
@@ -1097,6 +1337,7 @@
           onApplyTemplate={applyTemplate}
           onCancelReply={cancelReply}
         />
+        {/if}
       </div>
     </div>
 
@@ -1126,6 +1367,8 @@
         onAddFollower={addFollower}
         onRemoveFollower={removeFollower}
         onEnableNotifs={enableBrowserNotifs}
+        extensions={data.extensions}
+        onExtend={openExtend}
       />
     </div>
   </div>
@@ -1154,8 +1397,7 @@
       >
         <button
           type="button"
-          class="btn btn-ghost float-right mb-2"
-          style="height:40px; width:40px; padding:0;"
+          class="btn btn-ghost float-right mb-2 btn-lg btn-icon"
           aria-label="Close ticket info"
           onclick={() => (infoOpen = false)}
         >
@@ -1188,11 +1430,50 @@
           onAddFollower={addFollower}
           onRemoveFollower={removeFollower}
           onEnableNotifs={enableBrowserNotifs}
+          extensions={data.extensions}
+          onExtend={() => { infoOpen = false; openExtend(); }}
         />
       </aside>
     </div>
   {/if}
 </section>
+
+<form
+  bind:this={extendForm}
+  method="POST"
+  action="?/extend"
+  class="hidden"
+  use:enhance={() => {
+    extendBusy = true;
+    return async ({ result, update }) => {
+      extendBusy = false;
+      if (result.type === 'failure') {
+        extendError = (result.data?.extendError as string) ?? 'Could not extend the time.';
+        return;
+      }
+      if (result.type === 'success') extendOpen = false;
+      await update({ reset: false });
+    };
+  }}
+>
+  <input type="hidden" name="hours" value={extendHours} />
+  <input type="hidden" name="reason" value={extendReason} />
+</form>
+
+<ExtendTimeModal
+  open={extendOpen}
+  remaining={slaText}
+  busy={extendBusy}
+  error={extendError}
+  onconfirm={confirmExtend}
+  oncancel={() => (extendOpen = false)}
+/>
+
+<svelte:window onpopstate={onPopState} />
+
+{#if lightbox}
+  <ImageLightbox src={lightbox.src} alt={lightbox.alt} onclose={closeLightbox} />
+{/if}
 
 <style>
   /* Chat shell sizing.
@@ -1203,12 +1484,13 @@
      layout reflows: messages list shrinks, composer stays glued to the
      bottom edge — no gap below the composer. */
   .chat-shell {
-    /* Mobile: full-bleed. Navbar is ~60px (10+40+10 from py-2.5 + 40px
-       button height) plus the iOS notch inset. We prefer the JS-driven
+    /* Mobile: full-bleed. `--chrome-h` is the measured height of the navbar
+       plus any banner above <main> (set by +layout.svelte); the fallback is
+       the bare navbar (~60px) plus the iOS notch inset. We prefer the JS-driven
        `--vv-h` (window.visualViewport.height) over `100dvh` because
        only the former reliably shrinks when the iOS on-screen keyboard
        opens — `100dvh` lags or is unsupported in older Safari. */
-    height: calc(var(--vv-h, 100dvh) - 60px - env(safe-area-inset-top, 0px));
+    height: calc(var(--vv-h, 100dvh) - var(--chrome-h, calc(60px + env(safe-area-inset-top, 0px))));
     min-height: 0;
     border-radius: 0;
     border-left: none;
@@ -1218,11 +1500,18 @@
     .chat-shell {
       /* Tablet+: the section gets 40px of py-5 padding back, so subtract
          it from the available height. Restore card visuals. */
-      height: calc(var(--vv-h, 100dvh) - 60px - 40px);
+      height: calc(var(--vv-h, 100dvh) - var(--chrome-h, 60px) - 40px);
       min-height: 480px;
       border-radius: var(--radius-panel);
       border-left: 1px solid var(--glass-border);
       border-right: 1px solid var(--glass-border);
+    }
+  }
+  /* Landscape phones are wider than 640px but only ~390px tall: the tablet
+     minimum height would push the composer below the screen. */
+  @media (min-width: 640px) and (max-height: 520px) {
+    .chat-shell {
+      min-height: 0;
     }
   }
 

@@ -14,6 +14,17 @@
   import { enhance } from '$app/forms';
   import { niceDate } from './format';
   import type { NotifyState } from './notifications';
+  import { onMount } from 'svelte';
+  import UrgentReasonModal from './UrgentReasonModal.svelte';
+  import AgentTokenModal from './AgentTokenModal.svelte';
+  import {
+    PRIORITY_LABEL,
+    PRIORITY_ORDER,
+    SLA_HOURS,
+    formatRemaining,
+    slaTone,
+    type Priority
+  } from './sla';
 
   type Task = {
     id: number;
@@ -41,7 +52,9 @@
     id: number;
     title: string;
     status: 'open' | 'pending' | 'closed';
-    priority: 'urgent' | 'high' | 'normal' | 'low';
+    priority: Priority;
+    priority_reason: string | null;
+    sla_due_at: number | null;
     user_id: number;
     user_email: string;
     assigned_to: number | null;
@@ -85,6 +98,10 @@
     onAddFollower: () => void;
     onRemoveFollower: (email: string) => void;
     onEnableNotifs: () => void;
+    /** Past extension requests of this ticket, newest first. */
+    extensions: Array<{ id: number; hours: number; reason: string; created_at: number; user_email: string | null }>;
+    /** Opens the "Extend time" dialog owned by the page. */
+    onExtend: () => void;
   };
 
   let {
@@ -110,8 +127,65 @@
     onSaveProjects,
     onAddFollower,
     onRemoveFollower,
-    onEnableNotifs
+    onEnableNotifs,
+    extensions,
+    onExtend
   }: Props = $props();
+
+  // ── Priority + response-time target (any user with access can change it) ──
+  let priorityForm = $state<HTMLFormElement | null>(null);
+  let prioritySelect = $state<HTMLSelectElement | null>(null);
+  let urgentModalOpen = $state(false);
+  let agentTokenOpen = $state(false);
+  let hiddenReason = $state('');
+  let hiddenConfirm = $state('');
+  let priorityError = $state<string | null>(null);
+  let nowSec = $state(Math.floor(Date.now() / 1000));
+
+  onMount(() => {
+    const t = setInterval(() => (nowSec = Math.floor(Date.now() / 1000)), 30_000);
+    return () => clearInterval(t);
+  });
+
+  const remainingText = $derived(formatRemaining(ticket.sla_due_at, nowSec));
+  const tone = $derived(slaTone(ticket.sla_due_at, ticket.priority, nowSec));
+
+  function submitPriority(next: Priority, reason: string, confirm: string) {
+    if (!prioritySelect || !priorityForm) return;
+    prioritySelect.value = next;
+    hiddenReason = reason;
+    hiddenConfirm = confirm;
+    priorityError = null;
+    // Let the hidden inputs pick up the new values before the form serialises.
+    queueMicrotask(() => priorityForm?.requestSubmit());
+  }
+
+  function onPriorityChange(e: Event) {
+    const el = e.target as HTMLSelectElement;
+    const next = el.value as Priority;
+    if (next === ticket.priority) return;
+    if (next === 'urgent') {
+      el.value = ticket.priority; // stay on the current value until confirmed
+      urgentModalOpen = true;
+      return;
+    }
+    submitPriority(next, '', '');
+  }
+
+  /** Segmented control handler: same rules as the select change. */
+  function pickPriority(next: Priority) {
+    if (next === ticket.priority) return;
+    if (next === 'urgent') {
+      urgentModalOpen = true;
+      return;
+    }
+    submitPriority(next, '', '');
+  }
+
+  function onUrgentConfirmed(reason: string) {
+    urgentModalOpen = false;
+    submitPriority('urgent', reason, '1');
+  }
 </script>
 
 <!--
@@ -126,32 +200,116 @@
   right padding so the scrollbar does not overlap content.
 -->
 <aside
-  class="space-y-3.5 overflow-y-auto thin-scroll pr-1"
+  class="overflow-y-auto thin-scroll pr-1"
   style="max-height: calc(var(--vv-h, 100dvh) - 60px - 40px); min-height: 0;"
 >
-  <div class="glass p-4">
+<div class="glass" style="padding: 0;">
+  <div class="panel-section">
     <div class="label mb-2">Ticket</div>
     <dl class="text-[12.5px] space-y-1.5">
       <div class="flex justify-between gap-3">
         <dt class="text-muted">Opened</dt>
-        <dd class="font-mono text-fainter">{niceDate(ticket.created_at)}</dd>
+        <dd class="num text-fainter">{niceDate(ticket.created_at)}</dd>
       </div>
       <div class="flex justify-between gap-3">
         <dt class="text-muted">Updated</dt>
-        <dd class="font-mono text-fainter">{niceDate(ticket.updated_at)}</dd>
+        <dd class="num text-fainter">{niceDate(ticket.updated_at)}</dd>
       </div>
       <div class="flex justify-between gap-3">
         <dt class="text-muted">Author</dt>
-        <dd class="truncate max-w-[160px]">{owner?.email ?? '—'}</dd>
+        <dd class="truncate max-w-[160px]">{owner?.email ?? '-'}</dd>
       </div>
     </dl>
   </div>
 
+  <div class="panel-section">
+    <div class="flex items-center justify-between mb-2">
+      <div class="label">Priority</div>
+      <span class="num text-[12px] font-medium sla-{tone}" data-testid="sla-remaining">{remainingText}</span>
+    </div>
+    <form
+      bind:this={priorityForm}
+      method="POST"
+      action="?/priority"
+      use:enhance={() => async ({ result, update }) => {
+        if (result.type === 'failure') {
+          priorityError = (result.data?.priorityError as string) ?? 'Could not change the priority.';
+        }
+        await update({ reset: false });
+        if (prioritySelect) prioritySelect.value = ticket.priority;
+      }}
+    >
+      <!-- The select stays in the DOM (it is what the form posts) but the
+           segmented control below is the visible affordance. -->
+      <select
+        bind:this={prioritySelect}
+        name="priority"
+        class="sr-only"
+        tabindex="-1"
+        value={ticket.priority}
+        onchange={onPriorityChange}
+        aria-label="Priority"
+      >
+        {#each PRIORITY_ORDER as p}
+          <option value={p}>{PRIORITY_LABEL[p]} · {SLA_HOURS[p]}h</option>
+        {/each}
+      </select>
+      <input type="hidden" name="reason" value={hiddenReason} />
+      <input type="hidden" name="confirmUrgent" value={hiddenConfirm} />
+    </form>
+    <div class="segmented" role="group" aria-label="Priority">
+      {#each PRIORITY_ORDER as p}
+        <button
+          type="button"
+          class="segmented-item"
+          data-tone={p}
+          aria-pressed={ticket.priority === p}
+          title={`${PRIORITY_LABEL[p]}: ${SLA_HOURS[p]} h response target`}
+          data-testid={`priority-${p}`}
+          onclick={() => pickPriority(p)}
+        >{PRIORITY_LABEL[p]}</button>
+      {/each}
+    </div>
+    <p class="text-[11px] text-fainter mt-2" data-testid="sla-hint">
+      {SLA_HOURS[ticket.priority]} h target. The clock restarts with every message, from either side.
+    </p>
+    {#if ticket.status !== 'closed' && ticket.sla_due_at != null}
+      <button type="button" class="btn btn-sm w-full mt-2.5" onclick={onExtend}
+              data-testid="extend-time">
+        Extend time
+      </button>
+    {/if}
+    {#if extensions.length > 0}
+      <ul class="mt-3 space-y-2 text-xs" data-testid="extension-history">
+        {#each extensions.slice(0, 3) as x (x.id)}
+          <li class="rounded-lg px-2.5 py-1.5" style="background: var(--accent-wash);">
+            <div class="text-muted">
+              <strong class="num">+{x.hours} h</strong> · {x.user_email ?? 'someone'} · <span class="num">{niceDate(x.created_at)}</span>
+            </div>
+            <div class="mt-0.5 break-words">{x.reason}</div>
+          </li>
+        {/each}
+        {#if extensions.length > 3}
+          <li class="text-fainter">and {extensions.length - 3} earlier</li>
+        {/if}
+      </ul>
+    {/if}
+    {#if ticket.priority === 'urgent' && ticket.priority_reason}
+      <p class="text-xs mt-2" style="color: var(--color-danger);" data-testid="urgent-reason">
+        Urgent: {ticket.priority_reason}
+      </p>
+    {/if}
+    {#if priorityError}
+      <p class="text-xs mt-2" style="color: var(--color-danger);" role="alert">{priorityError}</p>
+    {/if}
+  </div>
+
   {#if isAdmin}
-    <div class="glass p-4">
+    <div class="panel-section">
       <div class="label mb-2">Assigned to</div>
       <select
         class="select"
+        aria-label="Assigned to"
         value={ticket.assigned_to ?? ''}
         onchange={(e) => onAssign(Number((e.target as HTMLSelectElement).value) || null)}
       >
@@ -163,32 +321,10 @@
         {/each}
       </select>
     </div>
-
-    <div class="glass p-4">
-      <div class="label mb-2">Archive</div>
-      <button class="btn w-full" onclick={onToggleArchive}>
-        {ticket.archived_at ? 'Restore ticket' : 'Archive ticket'}
-      </button>
-    </div>
-
-    <form method="POST" action="?/priority" use:enhance class="glass p-4">
-      <div class="label mb-2">Priority</div>
-      <select
-        name="priority"
-        class="select"
-        value={ticket.priority}
-        onchange={(e) => (e.target as HTMLSelectElement).form?.requestSubmit()}
-      >
-        <option value="urgent">🔥 Urgent</option>
-        <option value="high">⬆️ High</option>
-        <option value="normal">➖ Normal</option>
-        <option value="low">⬇️ Low</option>
-      </select>
-    </form>
   {/if}
 
   {#if group}
-    <div class="glass p-4">
+    <div class="panel-section">
       <div class="label mb-2">Group</div>
       <div class="text-sm">
         <span class="text-faint">{group.project_name} /</span>
@@ -202,7 +338,7 @@
     </div>
   {/if}
 
-  <div class="glass p-4">
+  <div class="panel-section">
     <div class="flex items-center justify-between mb-2">
       <div class="label">Projects</div>
       {#if isAdmin && !editingProjects}
@@ -217,8 +353,9 @@
             type="button"
             class="chip"
             style={active
-              ? 'background: linear-gradient(135deg, var(--color-accent), var(--color-accent-2)); color: oklch(0.15 0.04 270); border-color: transparent;'
+              ? 'background: var(--color-accent); color: var(--color-on-accent); border-color: transparent;'
               : ''}
+            aria-pressed={active}
             onclick={() => onToggleProject(p.id)}
           >
             {p.name}
@@ -227,13 +364,12 @@
       </div>
       <div class="flex justify-end gap-2">
         <button
-          class="btn btn-ghost"
-          style="height:28px;"
+          class="btn btn-ghost btn-xs"
           onclick={() => {
             editingProjects = false;
             projectDraft = projects.map((p) => p.id);
           }}>Cancel</button>
-        <button class="btn btn-primary" style="height:28px;" onclick={onSaveProjects}>Save</button>
+        <button class="btn btn-primary btn-xs" onclick={onSaveProjects}>Save</button>
       </div>
     {:else}
       <div class="flex flex-wrap gap-1.5">
@@ -247,17 +383,20 @@
     {/if}
   </div>
 
-  <TicketTasks
-    ticketId={ticket.id}
-    {tasks}
-    {participants}
-    canCreate={canCreateTask}
-    {isAdmin}
-    {viewerUserId}
-    onChanged={onTasksChanged}
-  />
+  <div class="panel-section">
+    <TicketTasks
+      ticketId={ticket.id}
+      {tasks}
+      {participants}
+      canCreate={canCreateTask}
+      {isAdmin}
+      {viewerUserId}
+      onChanged={onTasksChanged}
+      embedded
+    />
+  </div>
 
-  <div class="glass p-4">
+  <div class="panel-section">
     <div class="label mb-2">Participants</div>
     <ul class="space-y-1.5 mb-3">
       {#each participants as p}
@@ -277,16 +416,16 @@
     <div class="flex gap-2">
       <input
         class="input"
-        style="height:30px; font-size: 12px;"
+        style="height:32px; font-size: 12px;"
         placeholder="add@example.com"
         bind:value={followerDraft}
         onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), onAddFollower())}
       />
-      <button class="btn" style="height:30px;" onclick={onAddFollower}>Add</button>
+      <button class="btn btn-sm" onclick={onAddFollower}>Add</button>
     </div>
   </div>
 
-  <div class="glass p-4">
+  <div class="panel-section">
     <div class="label mb-2">Notifications</div>
     {#if notifState === 'unsupported'}
       <p class="text-fainter text-xs">This browser doesn't support push notifications.</p>
@@ -311,18 +450,56 @@
         <span class="text-success font-semibold">On</span> · you'll get a chirp on new messages.
       </p>
     {:else}
-      <button class="btn w-full" onclick={onEnableNotifs}>Enable notifications</button>
+      <button class="btn btn-sm w-full" onclick={onEnableNotifs}>Enable notifications</button>
     {/if}
   </div>
 
-  <div class="space-y-1.5">
-    <a
-      class="btn btn-ghost w-full justify-start"
-      href={`/api/tickets/${ticket.id}/export`}
-      download
-    >
-      ⬇ Export as markdown
-    </a>
-    <a class="btn btn-ghost w-full justify-start" href="/tickets">← Back to inbox</a>
+  <div class="panel-section">
+    <div class="label mb-2">Agent access</div>
+    <p class="text-xs text-muted mb-2.5 leading-relaxed">
+      Give a coding agent a 96-hour token to read this ticket, work on it and write a short reply.
+    </p>
+    <button type="button" class="btn btn-sm w-full" onclick={() => (agentTokenOpen = true)}>
+      Generate agent token
+    </button>
   </div>
+
+  <div class="panel-section">
+    <div class="flex items-center gap-1.5" role="group" aria-label="Export ticket">
+      <span class="label mr-auto">Export</span>
+      <a
+        class="btn btn-ghost btn-xs"
+        href={`/api/tickets/${ticket.id}/export?format=md`}
+        download
+        title="Markdown. A ZIP with the images and audio when the ticket has attachments."
+      >MD</a>
+      <a class="btn btn-ghost btn-xs" href={`/api/tickets/${ticket.id}/export?format=pdf`} download title="PDF with images">PDF</a>
+      <a class="btn btn-ghost btn-xs" href={`/api/tickets/${ticket.id}/export?format=docx`} download title="Word document with images">DOCX</a>
+    </div>
+    {#if isAdmin}
+      <button class="btn btn-ghost btn-sm w-full justify-start mt-2 -ml-1" onclick={onToggleArchive}
+              style="color: var(--color-muted);">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2" y="3" width="20" height="5" rx="1" />
+          <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+          <line x1="10" y1="13" x2="14" y2="13" />
+        </svg>
+        {ticket.archived_at ? 'Restore ticket' : 'Archive ticket'}
+      </button>
+    {/if}
+  </div>
+</div>
+
+<UrgentReasonModal
+  open={urgentModalOpen}
+  onconfirm={onUrgentConfirmed}
+  oncancel={() => (urgentModalOpen = false)}
+/>
+
+<AgentTokenModal
+  open={agentTokenOpen}
+  ticketId={ticket.id}
+  onclose={() => (agentTokenOpen = false)}
+/>
 </aside>

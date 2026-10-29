@@ -3,6 +3,8 @@
   import { fly, scale } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { fmtBytes } from '$lib/format';
+  import { PRIORITY_LABEL, PRIORITY_ORDER, SLA_HOURS, DEFAULT_PRIORITY, type Priority } from '$lib/sla';
+  import UrgentReasonModal from '$lib/UrgentReasonModal.svelte';
 
   type Project = { id: number; name: string; slug: string };
   type UserOption = { id: number; email: string };
@@ -17,6 +19,33 @@
 
   // Admin-only: the ticket owner (defaults to the admin themselves).
   // Regular users don't see this picker and `userId` stays unset.
+  // Response-time target. Urgent needs a written reason and a confirmation,
+  // collected in a modal; the server re-validates both.
+  let priority = $state<Priority>(DEFAULT_PRIORITY);
+  let priorityReason = $state('');
+  let confirmUrgent = $state('');
+  let urgentModalOpen = $state(false);
+  const PRIORITY_ICON: Record<Priority, string> = { urgent: '🔥', high: '⬆️', normal: '➖', low: '⬇️' };
+
+  function onPriorityPick(e: Event) {
+    const el = e.target as HTMLSelectElement;
+    const next = el.value as Priority;
+    if (next === 'urgent') {
+      el.value = priority; // stay on the previous value until confirmed
+      urgentModalOpen = true;
+      return;
+    }
+    priority = next;
+    priorityReason = '';
+    confirmUrgent = '';
+  }
+  function onUrgentConfirmed(reason: string) {
+    priority = 'urgent';
+    priorityReason = reason;
+    confirmUrgent = '1';
+    urgentModalOpen = false;
+  }
+
   let assignedUserId = $state<number | ''>('');
   let selectedGroupId = $state<number | ''>('');
 
@@ -185,6 +214,27 @@
         placeholder="Short summary"
         value={form?.title ?? ''}
       />
+    </div>
+
+    <div>
+      <label for="priority" class="label block mb-2">Priority</label>
+      <select id="priority" name="priority" class="input" value={priority} onchange={onPriorityPick}>
+        {#each PRIORITY_ORDER as p}
+          <option value={p}>{PRIORITY_ICON[p]} {PRIORITY_LABEL[p]} · reply within {SLA_HOURS[p]}h</option>
+        {/each}
+      </select>
+      <input type="hidden" name="priorityReason" value={priorityReason} />
+      <input type="hidden" name="confirmUrgent" value={confirmUrgent} />
+      {#if priority === 'urgent'}
+        <p class="text-xs mt-1.5" style="color: var(--color-danger);">
+          Urgent: {priorityReason}
+          <button type="button" class="link ml-1" onclick={() => (urgentModalOpen = true)}>Edit reason</button>
+        </p>
+      {:else}
+        <p class="text-fainter text-xs mt-1.5">
+          How soon you need a reply. Normal is the default.
+        </p>
+      {/if}
     </div>
 
     {#if data.users.length > 0}
@@ -363,7 +413,7 @@
                 <polyline points="14 2 14 8 20 8" />
               </svg>
               <span class="font-medium">{f.name}</span>
-              <span class="text-fainter font-mono">{fmtBytes(f.size)}</span>
+              <span class="text-fainter num">{fmtBytes(f.size)}</span>
               <button type="button" class="text-fainter hover:text-danger ml-1"
                       onclick={() => removeFile(i)} aria-label={`Remove ${f.name}`}>×</button>
             </li>
@@ -403,3 +453,10 @@
     </footer>
   </form>
 </section>
+
+<UrgentReasonModal
+  open={urgentModalOpen}
+  initialReason={priorityReason}
+  onconfirm={onUrgentConfirmed}
+  oncancel={() => (urgentModalOpen = false)}
+/>

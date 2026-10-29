@@ -21,7 +21,7 @@ import { randomBytes, scryptSync } from 'node:crypto';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dir, '..');
-const COMMUNITY = process.argv[2] || '/Volumes/SecondHD/Hilo-community';
+const COMMUNITY = process.argv[2] || '/data/hilo-community';
 const OUT = join(ROOT, 'community-assets', 'static');
 mkdirSync(OUT, { recursive: true });
 

@@ -19,6 +19,7 @@ import { db } from './db';
 import { config } from './env';
 import { log } from './logger';
 import { pruneAudit } from './audit';
+import { removeRendition, renditionName } from './audioRendition';
 import { pruneExpiredSessions } from './uploads-chunked';
 
 export type CleanupReport = {
@@ -76,10 +77,14 @@ export function pruneOrphanUploads(): { removed: number; bytesFreed: number } {
 	let removed = 0;
 	let bytesFreed = 0;
 
-	const known = new Set(
-		(db.prepare('SELECT stored_name FROM attachments').all() as Array<{ stored_name: string }>)
-			.map((r) => r.stored_name)
-	);
+	const known = new Set<string>();
+	for (const r of db.prepare('SELECT stored_name FROM attachments').all() as Array<{
+		stored_name: string;
+	}>) {
+		known.add(r.stored_name);
+		// The AAC rendition of a voice message lives next to its original.
+		known.add(renditionName(r.stored_name));
+	}
 
 	// Protect assembled-but-not-yet-attached files. After completeUploadSession()
 	// the row's partial_path holds the storedName (no directory separator).
@@ -167,6 +172,7 @@ export function pruneOldAttachments(retainDays?: number): number {
 	for (const row of rows) {
 		try {
 			unlinkSync(join(dir, row.stored_name));
+			removeRendition(row.stored_name);
 			removed++;
 		} catch {
 			// File already gone or never written — ignore.

@@ -19,7 +19,7 @@
    */
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { fmtBytes } from '$lib/format';
   import VoiceRecorder from '$lib/VoiceRecorder.svelte';
   import MicToText from '$lib/MicToText.svelte';
@@ -70,6 +70,31 @@
 
   let dragging = $state(false);
   let showRecorder = $state(false);
+  let recorderRef = $state<{ start: () => Promise<void> } | null>(null);
+
+  // Phones get the compact chat-app layout (rounded field, one round button
+  // that is a mic when empty and a send arrow otherwise). Tracked in JS only
+  // for things CSS cannot express (recorder bar, placeholder); the layout
+  // itself switches with CSS so the first paint is already right.
+  let isMobile = $state(false);
+  onMount(() => {
+    const mq = window.matchMedia('(max-width: 639.98px)');
+    isMobile = mq.matches;
+    const onChange = (e: MediaQueryListEvent) => (isMobile = e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  });
+
+  const hasContent = $derived(body.trim().length > 0 || pendingFiles.length > 0);
+  const canRecord = () =>
+    typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function';
+
+  /** Phone mic tap: open the recording bar and start straight away. */
+  async function startVoiceOnPhone() {
+    showRecorder = true;
+    await tick();
+    await recorderRef?.start();
+  }
 
   // ── Chunked upload tracking ───────────────────────────────────────────────
 
@@ -471,8 +496,8 @@
 </script>
 
 <form
-  class="border-t p-3 sm:p-4 space-y-2.5 transition-colors"
-  style="border-color: var(--glass-border); {dragging ? 'background: oklch(0.74 0.18 295 / 0.06); border-color: var(--color-accent);' : ''}"
+  class="border-t p-2 sm:p-4 space-y-2 sm:space-y-2.5 transition-colors"
+  style="border-color: var(--glass-border); {dragging ? 'background: var(--accent-wash); border-color: var(--color-accent);' : ''}"
   ondragover={onDragOver}
   ondragleave={onDragLeave}
   ondrop={onDrop}
@@ -485,7 +510,7 @@
   {#if replyingTo}
     <!-- Reply pill: shows the context being replied to with a cancel button -->
     <div class="flex items-center gap-2 px-3 py-2 rounded-lg border-l-4"
-         style="border-color: var(--color-accent); background: oklch(0.74 0.18 295 / 0.06);"
+         style="border-color: var(--color-accent); background: var(--accent-wash);"
          in:fly={{ y: -4, duration: 180, easing: cubicOut }}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
@@ -497,7 +522,7 @@
         <div class="text-xs text-muted">Replying to <strong>{replyingTo.sender_email}</strong></div>
         <div class="text-sm truncate text-muted">{replyingTo.body.slice(0, 80)}{replyingTo.body.length > 80 ? '…' : ''}</div>
       </div>
-      <button type="button" class="btn btn-ghost shrink-0" style="height:28px; width:28px; padding:0;"
+      <button type="button" class="btn btn-ghost shrink-0 btn-xs btn-icon"
               aria-label="Cancel reply"
               onclick={() => onCancelReply?.()}>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -510,14 +535,13 @@
 
   {#if isAdmin}
     <div class="flex items-center gap-3 text-xs">
-      <label class="inline-flex items-center gap-1.5 cursor-pointer text-muted">
-        <input type="checkbox" bind:checked={asInternal} style="accent-color: var(--color-warn);" />
+      <label class="inline-flex items-center gap-2 cursor-pointer text-muted select-none">
+        <input type="checkbox" bind:checked={asInternal} />
         Internal note <span class="text-fainter">(admin-only)</span>
       </label>
-      <span class="text-fainter">·</span>
       <select
-        class="select w-auto"
-        style="height:28px; padding: 0 8px; font-size: 12px;"
+        class="select select-sm w-auto"
+        aria-label="Reply templates"
         onchange={(e) => {
           const v = (e.target as HTMLSelectElement).value;
           if (v) {
@@ -531,6 +555,9 @@
         <option value="Closing this out — please reopen if you see it again.">Closing</option>
         <option value="Could you share a screenshot or repro steps? Thanks.">Ask for repro</option>
       </select>
+      <span class="ml-auto hidden md:inline-flex items-center gap-1 text-fainter" aria-hidden="true">
+        <span class="kbd">Ctrl</span><span class="kbd">Enter</span> to send
+      </span>
     </div>
   {/if}
 
@@ -543,7 +570,7 @@
     -->
     <div
       class="rounded-xl px-3 py-2 text-xs"
-      style="background: oklch(0.74 0.18 295 / 0.08); border: 1px solid oklch(0.74 0.18 295 / 0.3);"
+      style="background: var(--accent-wash); border: 1px solid var(--accent-line);"
       in:fly={{ y: -4, duration: 180, easing: cubicOut }}
     >
       <div class="font-medium mb-1">
@@ -668,7 +695,7 @@
           <li class="glass-subtle px-2.5 py-1 text-xs">
             <span class="inline-flex items-center gap-2">
               <span class="font-medium">{f.name}</span>
-              <span class="text-fainter font-mono">{fmtBytes(f.size)}</span>
+              <span class="text-fainter num">{fmtBytes(f.size)}</span>
               <button type="button" class="text-fainter hover:text-danger"
                       aria-label={`Remove ${f.name}`}
                       onclick={() => removeFile(i)}>×</button>
@@ -698,22 +725,29 @@
   {#if showRecorder}
     <div in:fly={{ y: 4, duration: 180, easing: cubicOut }}>
       <VoiceRecorder
-        onrecorded={({ blob, mimeType, durationMs }) => {
+        bind:this={recorderRef}
+        bar={isMobile}
+        onrecorded={async ({ blob, mimeType, durationMs, send }) => {
           // Derive a safe filename from the mime type.
           const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
           const file = new File([blob], `voice-msg.${ext}`, { type: mimeType });
           addFiles([file]);
           showRecorder = false;
-          // Surface the duration for the user to see in the pending file list.
           void durationMs; // used by the blob builder; no further action needed here.
+          // The phone bar's round button means "send now".
+          if (send) {
+            await tick();
+            onSend();
+          }
         }}
         oncancel={() => { showRecorder = false; }}
       />
     </div>
   {/if}
 
-  <div class="flex items-end gap-2">
-    <label class="btn btn-ghost shrink-0 cursor-pointer" style="height:38px;"
+  <div class="flex items-end gap-2 {showRecorder && isMobile ? 'hidden' : ''}" data-testid="composer-row">
+    <!-- Desktop / tablet controls -->
+    <label class="btn btn-ghost shrink-0 cursor-pointer max-sm:hidden"
            aria-label="Attach file">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -722,13 +756,12 @@
       <input type="file" multiple class="hidden" onchange={onFileInput} />
     </label>
 
-    <!-- Voice-message mic: toggles the recorder panel.
-         Hidden when getUserMedia is unavailable. -->
-    {#if typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function'}
+    {#if canRecord()}
+      <!-- Voice-message mic: toggles the recorder panel. -->
       <button
         type="button"
-        class="btn shrink-0"
-        style="height:38px; width:38px; padding:0; {showRecorder ? 'background: oklch(0.74 0.18 295 / 0.18); border-color: oklch(0.74 0.18 295 / 0.5);' : ''}"
+        class="btn btn-icon shrink-0 max-sm:hidden"
+        style={showRecorder ? "background: var(--accent-wash-strong); border-color: var(--accent-line);" : ""}
         aria-label={showRecorder ? 'Hide voice recorder' : 'Record voice message'}
         aria-pressed={showRecorder}
         disabled={sending}
@@ -744,35 +777,76 @@
         </svg>
       </button>
 
-      <!-- Dictation mic (speech bubble glyph): appends transcribed text to the textarea. -->
-      <MicToText
-        {sending}
-        voiceRecorderActive={showRecorder}
-        ontext={(text) => { body = body ? `${body}${text}` : text.trimStart(); }}
-      />
+      <!-- Dictation (speech bubble glyph): appends transcribed text to the textarea. -->
+      <span class="max-sm:hidden">
+        <MicToText
+          {sending}
+          voiceRecorderActive={showRecorder}
+          ontext={(text) => { body = body ? `${body}${text}` : text.trimStart(); }}
+        />
+      </span>
     {/if}
 
-    <textarea
-      class="textarea flex-1"
-      rows="1"
-      placeholder={dragging
-        ? 'Drop files…'
-        : asInternal
-          ? 'Internal note (only admins will see this)…'
-          : 'Reply… (⌘/Ctrl + ↩ to send)'}
-      bind:value={body}
-      bind:this={textareaRef}
-      oninput={onTyping}
-      onkeydown={onKeydown}
-      style="min-height: 38px; max-height: min(40dvh, 360px); resize: none; overflow-y: auto;"
-    ></textarea>
+    <!-- Phones: one rounded field holding dictation, text, attach and camera.
+         From sm up the wrapper disappears (display: contents) and the
+         textarea sits between the desktop controls as before. -->
+    <div class="composer-pill flex flex-1 min-w-0 items-end sm:contents">
+      {#if canRecord()}
+        <span class="sm:hidden shrink-0">
+          <MicToText
+            bare
+            {sending}
+            voiceRecorderActive={showRecorder}
+            ontext={(text) => { body = body ? `${body}${text}` : text.trimStart(); }}
+          />
+        </span>
+      {/if}
 
+      <textarea
+        class="textarea flex-1 min-w-0"
+        rows="1"
+        placeholder={dragging
+          ? 'Drop files…'
+          : asInternal
+            ? isMobile ? 'Internal note…' : 'Internal note (only admins will see this)…'
+            : isMobile ? 'Message' : 'Write a reply…'}
+        bind:value={body}
+        bind:this={textareaRef}
+        oninput={onTyping}
+        onkeydown={onKeydown}
+        enterkeyhint="enter"
+        style="min-height: 38px; max-height: min(40dvh, 360px); resize: none; overflow-y: auto;"
+      ></textarea>
+
+      <div class="sm:hidden shrink-0 flex items-center">
+        <label class="btn btn-ghost cursor-pointer btn-lg btn-icon btn-round" aria-label="Attach file" data-testid="composer-attach">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+          </svg>
+          <input type="file" multiple class="hidden" onchange={onFileInput} />
+        </label>
+        <!-- Camera: opens the device camera directly on phones. Hidden while
+             typing, like a chat app, to leave room for the text. -->
+        {#if !body.trim()}
+          <label class="btn btn-ghost cursor-pointer btn-lg btn-icon btn-round" aria-label="Take a photo" data-testid="composer-camera">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+            <input type="file" accept="image/*" capture="environment" class="hidden" onchange={onFileInput} />
+          </label>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Desktop / tablet send -->
     <button
       type="submit"
-      class="btn btn-primary shrink-0"
-      style="height:38px;"
+      class="btn btn-primary shrink-0 max-sm:hidden"
       disabled={sending || _isChunkedUploading}
-      title={_isChunkedUploading ? 'Wait for uploads to finish' : undefined}
+      title={_isChunkedUploading ? 'Wait for uploads to finish' : 'Send (Ctrl or Cmd + Enter)'}
     >
       {#if sending}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -788,5 +862,88 @@
         </svg>
       {/if}
     </button>
+
+    <!-- Phones: a single round button. Mic when there is nothing to send,
+         send arrow otherwise (same behaviour as the big chat apps). -->
+    {#if hasContent || !canRecord()}
+      <button
+        type="submit"
+        class="btn btn-primary shrink-0 sm:hidden btn-xl btn-icon btn-round"
+        disabled={sending || _isChunkedUploading || !hasContent}
+        aria-label="Send"
+        data-testid="composer-send"
+        title={_isChunkedUploading ? 'Wait for uploads to finish' : undefined}
+      >
+        {#if sending}
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2.5" stroke-linecap="round" class="animate-spin" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+          </svg>
+        {:else}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="22" y1="2" x2="11" y2="13" />
+            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+          </svg>
+        {/if}
+      </button>
+    {:else}
+      <button
+        type="button"
+        class="btn btn-primary shrink-0 sm:hidden btn-xl btn-icon btn-round"
+        disabled={sending}
+        aria-label="Record voice message"
+        data-testid="composer-mic"
+        onclick={startVoiceOnPhone}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+          <line x1="12" y1="19" x2="12" y2="23" />
+          <line x1="8" y1="23" x2="16" y2="23" />
+        </svg>
+      </button>
+    {/if}
   </div>
 </form>
+
+<style>
+  /* Phone composer: the field is a rounded pill that owns the border and the
+     focus ring, and the textarea inside it is borderless. */
+  @media (max-width: 639.98px) {
+    .composer-pill {
+      min-height: 44px;
+      padding: 0 4px;
+      border-radius: 24px;
+      border: 1px solid var(--glass-border);
+      background: oklch(0 0 0 / 0.2);
+      transition: border-color 180ms, box-shadow 180ms;
+    }
+    :global(:root[data-theme='light']) .composer-pill {
+      background: oklch(1 0 0 / 0.7);
+    }
+    .composer-pill:focus-within {
+      border-color: var(--color-accent);
+      box-shadow: 0 0 0 3px var(--accent-wash-strong);
+    }
+    /* Icon buttons inside the pill are flat: no glass highlight ring. */
+    .composer-pill :global(.btn) {
+      box-shadow: none;
+    }
+    .composer-pill textarea {
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      border-radius: 0;
+      padding: 10px 6px;
+      line-height: 1.35;
+      /* About six lines, like a chat app, then it scrolls. */
+      max-height: min(28dvh, 144px) !important;
+    }
+    .composer-pill textarea:focus {
+      border: 0;
+      box-shadow: none;
+    }
+  }
+</style>

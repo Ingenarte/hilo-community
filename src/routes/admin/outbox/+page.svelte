@@ -161,12 +161,12 @@
 
   {#if pageCount > 1}
     <nav class="flex items-center justify-center gap-3 mt-5" aria-label="Pagination">
-      <a class="btn btn-ghost" style="height:36px;"
+      <a class="btn btn-ghost"
          href={`?${new URLSearchParams({ ...Object.fromEntries($page.url.searchParams), page: String(Math.max(1, data.page - 1)) })}`}>
         ← Prev
       </a>
       <span class="text-muted text-xs font-mono">Page {data.page} of {pageCount}</span>
-      <a class="btn btn-ghost" style="height:36px;"
+      <a class="btn btn-ghost"
          href={`?${new URLSearchParams({ ...Object.fromEntries($page.url.searchParams), page: String(Math.min(pageCount, data.page + 1)) })}`}>
         Next →
       </a>

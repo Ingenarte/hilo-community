@@ -112,8 +112,7 @@
 <button
 	bind:this={triggerRef}
 	type="button"
-	class="btn btn-ghost relative"
-	style="height:40px; width:40px; padding:0;"
+	class="btn btn-ghost relative btn-lg btn-icon"
 	aria-label={hasUnseen ? "What's new — updates available" : "What's new"}
 	aria-haspopup="dialog"
 	aria-expanded={open}
@@ -174,8 +173,7 @@
 				<button
 					bind:this={closeRef}
 					type="button"
-					class="btn btn-ghost"
-					style="height: 28px; width: 28px; padding: 0; border-radius: 999px;"
+					class="btn btn-ghost btn-xs btn-icon btn-round"
 					aria-label="Close"
 					onclick={closePanel}
 				>
@@ -197,7 +195,7 @@
 					<ul class="space-y-3">
 						{#each payload.entries as entry}
 							<li>
-								<div class="text-fainter text-[10.5px] font-mono uppercase tracking-wider mb-1">
+								<div class="text-fainter text-[10.5px] font-semibold uppercase tracking-wider mb-1">
 									{todayBadge(entry.date)}{entry.date}
 								</div>
 								<ul class="space-y-1.5">

@@ -53,6 +53,8 @@
 		isAdmin: boolean;
 		viewerUserId: number;
 		onChanged: () => void;
+		/** Render without its own card (inside a sectioned panel). */
+		embedded?: boolean;
 	};
 
 	const {
@@ -62,7 +64,8 @@
 		canCreate,
 		isAdmin,
 		viewerUserId,
-		onChanged
+		onChanged,
+		embedded = false
 	}: Props = $props();
 
 	let showAdd = $state(false);
@@ -163,7 +166,7 @@
 	}
 </script>
 
-<div class="glass p-4">
+<div class={embedded ? '' : 'glass p-4'}>
 	<div class="flex items-center justify-between mb-2">
 		<div class="label">Tasks</div>
 		{#if canCreate}
@@ -213,7 +216,7 @@
 									the assignee email at the bottom of the row.
 								-->
 								<span
-									class="inline-flex items-center font-mono font-bold"
+									class="inline-flex items-center font-bold"
 									style="font-size: 9px; line-height: 1; letter-spacing: 0.12em;
 									       padding: 2px 5px; border-radius: 999px;
 									       background: linear-gradient(135deg, oklch(0.82 0.18 75), oklch(0.7 0.22 25));
@@ -229,7 +232,7 @@
 								{t.description}
 							</div>
 						{/if}
-						<div class="text-fainter text-[10.5px] mt-1 font-mono">
+						<div class="text-fainter text-[10.5px] mt-1">
 							[{shortLabel(t.assignee_email)}] · by {shortLabel(t.created_by_email)}
 							{#if done && t.completed_by_email}
 								· done by {shortLabel(t.completed_by_email)}

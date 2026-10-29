@@ -16,6 +16,10 @@ function authorise(messageId: number, locals: App.Locals) {
 	const t = getTicket(ticketId);
 	if (!t) throw error(404, 'Ticket not found');
 	if (!canAccessTicket(locals.user, t)) throw error(403, 'Forbidden');
+	// Closed tickets are frozen for users: only an administrator may still change messages.
+	if (t.status === 'closed' && locals.user.role !== 'admin') {
+		throw error(409, 'This ticket is closed, so its messages can no longer be changed.');
+	}
 	return { ticketId };
 }
 

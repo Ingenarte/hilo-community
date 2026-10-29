@@ -6,9 +6,9 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from 'remotion';
-import { Background } from '../../components';
 import { ACCENT, CYAN, FONT, MONO } from '../../theme';
 import type { FeatureData } from './data';
+import { CONTENT_RIGHT_PAD } from './NarratorPanel';
 import { FeatureVisual } from './Visuals';
 
 /**
@@ -30,14 +30,21 @@ export const FeatureScene: React.FC<{ data: FeatureData }> = ({ data }) => {
 
   return (
     <AbsoluteFill style={{ fontFamily: FONT, color: '#fff', opacity: fadeOut }}>
-      <Background />
-      <AbsoluteFill style={{ flexDirection: 'row', padding: 90, gap: 70, alignItems: 'center' }}>
+      <AbsoluteFill
+        style={{
+          flexDirection: 'row',
+          padding: 80,
+          paddingRight: CONTENT_RIGHT_PAD,
+          gap: 50,
+          alignItems: 'center',
+        }}
+      >
         {/* Left: numeral + title + bullets */}
-        <div style={{ flex: 1.05, transform: `translateX(${-slide}px)` }}>
+        <div style={{ flex: 1.15, transform: `translateX(${-slide}px)` }}>
           <div
             style={{
               fontFamily: MONO,
-              fontSize: 190,
+              fontSize: 150,
               fontWeight: 800,
               lineHeight: 1,
               backgroundImage: ACCENT,
@@ -49,7 +56,7 @@ export const FeatureScene: React.FC<{ data: FeatureData }> = ({ data }) => {
           >
             {numeral}
           </div>
-          <div style={{ fontSize: 62, fontWeight: 900, letterSpacing: -1.5, lineHeight: 1.08, marginBottom: 44 }}>
+          <div style={{ fontSize: 50, fontWeight: 900, letterSpacing: -1.2, lineHeight: 1.08, marginBottom: 36 }}>
             {data.title}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
@@ -78,7 +85,7 @@ export const FeatureScene: React.FC<{ data: FeatureData }> = ({ data }) => {
                       boxShadow: `0 0 16px ${CYAN}88`,
                     }}
                   />
-                  <span style={{ fontSize: 33, color: 'rgba(255,255,255,0.82)', fontWeight: 500 }}>{b}</span>
+                  <span style={{ fontSize: 28, color: 'rgba(255,255,255,0.82)', fontWeight: 500 }}>{b}</span>
                 </div>
               );
             })}
@@ -89,7 +96,7 @@ export const FeatureScene: React.FC<{ data: FeatureData }> = ({ data }) => {
         <div
           style={{
             flex: 1,
-            height: 640,
+            height: 580,
             borderRadius: 30,
             background: 'rgba(255,255,255,0.035)',
             border: '1px solid rgba(255,255,255,0.10)',

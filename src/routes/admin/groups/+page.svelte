@@ -126,8 +126,7 @@
       />
       <button
         type="button"
-        class="btn btn-primary w-full sm:w-auto"
-        style="height:40px;"
+        class="btn btn-primary w-full sm:w-auto btn-lg"
         onclick={createGroup}
         disabled={creating || !newName.trim() || !newProjectId}
       >

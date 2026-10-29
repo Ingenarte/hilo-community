@@ -3,10 +3,15 @@ import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { createTicket } from '$lib/server/tickets';
 import { audit } from '$lib/server/audit';
+import { DEFAULT_PRIORITY, checkUrgentRequest, isPriority } from '$lib/sla';
 
 /**
  * POST /api/tickets
- * JSON body: { title, body, priority?, projectId?, newProjectName? }
+ * JSON body: { title, body, priority?, priorityReason?, confirmUrgent?, projectId?, newProjectName? }
+ *
+ * `priority` is urgent|high|normal|low (default normal) and sets the response
+ * target (24/48/72/96 h). Urgent also needs `priorityReason` (>= 10 chars) and
+ * `confirmUrgent: true`.
  *
  * Rules (sprint-26may):
  *  - A ticket MUST be associated with a project. No project → 400.
@@ -21,6 +26,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		title?: string;
 		body?: string;
 		priority?: string;
+		priorityReason?: string;
+		confirmUrgent?: boolean | string;
 		projectId?: number;
 		newProjectName?: string;
 	};
@@ -29,6 +36,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const messageBody = String(body.body || '').trim();
 	if (!title) throw error(400, 'title is required');
 	if (!messageBody) throw error(400, 'body is required');
+
+	const priority = body.priority ?? DEFAULT_PRIORITY;
+	if (!isPriority(priority)) throw error(400, 'priority must be urgent, high, normal or low');
+	let priorityReason: string | null = null;
+	if (priority === 'urgent') {
+		const check = checkUrgentRequest(body.priorityReason, body.confirmUrgent);
+		if (!check.ok) throw error(400, check.error);
+		priorityReason = check.reason;
+	}
 
 	let projectId: number;
 
@@ -75,12 +91,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		throw error(400, 'A project is required');
 	}
 
-	const ticketId = createTicket({ userId: locals.user.id, title, projectIds: [projectId] });
+	const ticketId = createTicket({
+		userId: locals.user.id,
+		title,
+		projectIds: [projectId],
+		priority,
+		priorityReason
+	});
 
 	audit('ticket.created', {
 		actor: locals.user,
 		target: `ticket:${ticketId}`,
-		detail: { title, projectId }
+		detail: { title, projectId, priority, priorityReason }
 	});
 
 	return json({ ok: true, ticketId });

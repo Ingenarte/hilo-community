@@ -1,12 +1,11 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
-import { SESSION_COOKIE, setUserPassword } from '$lib/server/auth';
+import { SESSION_COOKIE, changeUserPassword } from '$lib/server/auth';
+import { validateNewPassword } from '$lib/passwordPolicy';
+import { isPwnedPassword } from '$lib/server/pwned';
 import { verifyPassword } from '$lib/server/password';
 import { rateLimit } from '$lib/server/rateLimit';
-
-/** Minimum password length — must match hashPassword's own guard. */
-const MIN_PASSWORD_LENGTH = 8;
 
 export const POST: RequestHandler = async ({ request, locals, cookies }) => {
 	if (!locals.user) throw error(401, 'Unauthorized');
@@ -54,22 +53,23 @@ export const POST: RequestHandler = async ({ request, locals, cookies }) => {
 	}
 
 	// Validate the new password.
-	if (next.length < MIN_PASSWORD_LENGTH) {
-		return json({ error: 'weak_password' }, { status: 400 });
-	}
 	if (next === current) {
 		return json({ error: 'password_unchanged' }, { status: 400 });
 	}
+	const problem = validateNewPassword(next, locals.user.email);
+	if (problem) {
+		return json({ error: problem === 'too_short' ? 'weak_password' : problem }, { status: 400 });
+	}
+	if (await isPwnedPassword(next)) {
+		return json({ error: 'pwned' }, { status: 400 });
+	}
 
-	// Persist the new password hash.
-	await setUserPassword(locals.user.id, next);
+	// Persist the new hash and sign out every other device; this session stays.
+	const revokedCount = await changeUserPassword(
+		locals.user.id,
+		next,
+		cookies.get(SESSION_COOKIE) ?? ''
+	);
 
-	// Revoke every other active session so devices using the old password
-	// are forced to re-authenticate. Keep only the current session.
-	const currentSessionId = cookies.get(SESSION_COOKIE) ?? '';
-	const revoked = db
-		.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?')
-		.run(locals.user.id, currentSessionId);
-
-	return json({ ok: true, other_sessions_revoked: revoked.changes });
+	return json({ ok: true, other_sessions_revoked: revokedCount });
 };

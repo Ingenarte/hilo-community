@@ -1,3 +1,4 @@
+import { DEFAULT_PRIORITY, checkUrgentRequest, isPriority } from '$lib/sla';
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import {
@@ -5,7 +6,7 @@ import {
 	appendMessage,
 	createTicket,
 	getAdminUser,
-	listProjects,
+	listActiveProjects,
 	listProjectsForUser
 } from '$lib/server/tickets';
 import { isGroupValidForProjects, listGroupsForProject } from '$lib/server/groups';
@@ -19,8 +20,11 @@ import { audit } from '$lib/server/audit';
 
 export const load: PageServerLoad = ({ locals }) => {
 	if (!locals.user) throw redirect(302, '/login');
+	// Archived projects never take new tickets, for admins either.
 	const projects =
-		locals.user.role === 'admin' ? listProjects() : listProjectsForUser(locals.user.id);
+		locals.user.role === 'admin'
+			? listActiveProjects()
+			: listProjectsForUser(locals.user.id);
 	// Admin can create a ticket "on behalf of" any active user — the picker
 	// shows up only for admins in the new-ticket UI. The current admin is
 	// excluded: admins cannot own tickets themselves under this model.
@@ -67,7 +71,7 @@ function resolveProjectsForUser(
 ): number[] {
 	const ids: number[] = [];
 	const seen = new Set<string>();
-	const findStmt = db.prepare('SELECT id FROM projects WHERE name = ? COLLATE NOCASE');
+	const findStmt = db.prepare('SELECT id, status FROM projects WHERE name = ? COLLATE NOCASE');
 	const assignStmt = db.prepare(
 		'SELECT 1 FROM user_projects WHERE user_id = ? AND project_id = ?'
 	);
@@ -87,8 +91,11 @@ function resolveProjectsForUser(
 		if (seen.has(key)) continue;
 		seen.add(key);
 
-		const found = findStmt.get(name) as { id: number } | undefined;
+		const found = findStmt.get(name) as { id: number; status: string } | undefined;
 		if (found) {
+			if (found.status === 'archived') {
+				throw error(400, `Project "${name}" is archived and does not accept new tickets.`);
+			}
 			if (user.role !== 'admin' && !assignStmt.get(user.id, found.id)) {
 				throw error(403, `You are not assigned to project "${name}".`);
 			}
@@ -128,9 +135,19 @@ export const actions: Actions = {
 			.getAll('projects')
 			.map((v) => String(v).trim())
 			.filter(Boolean);
+		const priorityRaw = String(form.get('priority') || DEFAULT_PRIORITY);
 		const files = form
 			.getAll('files')
 			.filter((f): f is File => f instanceof File && f.size > 0);
+
+		if (!isPriority(priorityRaw))
+			return fail(400, { error: 'Pick a valid priority.', title, body });
+		let priorityReason: string | null = null;
+		if (priorityRaw === 'urgent') {
+			const check = checkUrgentRequest(form.get('priorityReason'), form.get('confirmUrgent'));
+			if (!check.ok) return fail(400, { error: check.error, title, body });
+			priorityReason = check.reason;
+		}
 
 		if (!title) return fail(400, { error: 'Please give your ticket a short title.', title, body });
 		if (!body) return fail(400, { error: 'Please write your first message.', title, body });
@@ -206,11 +223,18 @@ export const actions: Actions = {
 			groupId = candidate;
 		}
 
-		const ticketId = createTicket({ userId: ownerId, title, projectIds, groupId });
+		const ticketId = createTicket({
+			userId: ownerId,
+			title,
+			projectIds,
+			groupId,
+			priority: priorityRaw,
+			priorityReason
+		});
 		audit('ticket.created', {
 			actor: locals.user,
 			target: `ticket:${ticketId}`,
-			detail: { title, projects: projectNames, ownerId, ownerEmail }
+			detail: { title, projects: projectNames, ownerId, ownerEmail, priority: priorityRaw, priorityReason }
 		});
 		const messageId = appendMessage({
 			ticketId,
@@ -257,7 +281,7 @@ export const actions: Actions = {
 		dispatchWebhooks('ticket.new', {
 			ticket_id: ticketId,
 			title,
-			priority: 'normal',
+			priority: priorityRaw,
 			status: 'open',
 			author: locals.user.email,
 			preview: body,
@@ -265,6 +289,6 @@ export const actions: Actions = {
 			brand: config.brand
 		});
 
-		throw redirect(303, `/tickets/${ticketId}`);
+		throw redirect(303, '/tickets');
 	}
 };

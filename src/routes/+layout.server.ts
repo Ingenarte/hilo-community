@@ -2,6 +2,7 @@ import type { LayoutServerLoad } from './$types';
 import { config } from '$lib/server/env';
 import { db } from '$lib/server/db';
 import { getUnreadTotal } from '$lib/server/reads';
+import { countPasskeys, passkeysEnabled } from '$lib/server/passkeys';
 
 export const load: LayoutServerLoad = ({ locals }) => {
 	// Sprint D: surface the user's real unread total so the layout can
@@ -14,11 +15,25 @@ export const load: LayoutServerLoad = ({ locals }) => {
 	// Sprint-35jun: load seen_install_help_at for the first-login help modal.
 	// null = never seen (trigger auto-open); number = already dismissed.
 	let seenInstallHelpAt: number | null = null;
+	// Reminder for accounts that still use the password that was emailed to them.
+	let passwordNudge = false;
+	let passkeyOffer = false;
 	if (locals.user) {
 		const row = db
-			.prepare('SELECT seen_install_help_at FROM users WHERE id = ?')
-			.get(locals.user.id) as { seen_install_help_at: number | null } | undefined;
+			.prepare(
+				'SELECT seen_install_help_at, password_changed_at, must_change_password FROM users WHERE id = ?'
+			)
+			.get(locals.user.id) as
+			| {
+					seen_install_help_at: number | null;
+					password_changed_at: number | null;
+					must_change_password: number;
+			  }
+			| undefined;
 		seenInstallHelpAt = row?.seen_install_help_at ?? null;
+		passwordNudge = !!row && row.password_changed_at === null && row.must_change_password === 0;
+		// Suggest a passkey once, when the user has none.
+		passkeyOffer = passkeysEnabled() && !!row && row.must_change_password === 0 && countPasskeys(locals.user.id) === 0;
 	}
 
 	return {
@@ -27,6 +42,8 @@ export const load: LayoutServerLoad = ({ locals }) => {
 		theme: locals.user?.theme ?? 'dark',
 		accent: locals.user?.accent ?? 'violet',
 		unreadTotal,
-		seenInstallHelpAt: locals.user ? seenInstallHelpAt : undefined
+		seenInstallHelpAt: locals.user ? seenInstallHelpAt : undefined,
+		passwordNudge,
+		passkeyOffer
 	};
 };

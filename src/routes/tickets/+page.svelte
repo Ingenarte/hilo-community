@@ -1,6 +1,8 @@
 <script lang="ts">
+  import BulkActionsBar from '$lib/BulkActionsBar.svelte';
   import { goto, invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
+  import { saveTicketNav } from '$lib/ticketNav';
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import ExportCsvButton from '$lib/ExportCsvButton.svelte';
@@ -35,12 +37,23 @@
       perPage: number;
       hasMore: boolean;
       projects: Project[];
-      filters: { search: string; status: string; priority: string; projectId: number | null; archived: boolean };
+      users: Array<{ id: number; email: string }>;
+      filters: { search: string; status: string; statusDefault: boolean; priority: string; projectId: number | null; userId: number | null; archived: boolean };
       isAdmin: boolean;
     };
   };
 
   const { data }: Props = $props();
+
+  // Remember this list's order so a ticket opened from it can offer
+  // previous / next without going back to the list.
+  $effect(() => {
+    saveTicketNav({
+      href: page.url.pathname + page.url.search,
+      source: 'inbox',
+      ids: data.tickets.map((t) => t.id)
+    });
+  });
 
   function tasksFor(ticketId: number): TaskHint[] {
     return data.myTasksByTicket[ticketId] ?? [];
@@ -48,9 +61,10 @@
 
   // local input state, mirrored from server-provided filters
   let q = $state('');
-  let status = $state('any');
+  let status = $state('active');
   let priority = $state('any');
   let project = $state<string>('any');
+  let owner = $state<string>('any');
   let archived = $state(false);
 
   // Mobile filter panel toggle
@@ -61,12 +75,12 @@
     status = data.filters.status;
     priority = data.filters.priority;
     project = data.filters.projectId == null ? 'any' : String(data.filters.projectId);
+    owner = data.filters.userId == null ? 'any' : String(data.filters.userId);
     archived = data.filters.archived;
   });
 
   // selection (admin only)
   let selected = $state<Set<number>>(new Set());
-  let bulkPriority = $state<'urgent' | 'high' | 'normal' | 'low'>('normal');
 
   // Hover popover for the "Pending task" chips. One viewport-positioned
   // panel shared across every chip — cheaper than building one popover
@@ -120,23 +134,26 @@
   }
 
   // URL params: q, status, priority, project, archived (matches +page.server.ts)
-  function syncFilters(patch: Partial<{ q: string; status: string; priority: string; project: string; archived: boolean }>) {
+  function syncFilters(patch: Partial<{ q: string; status: string; priority: string; project: string; user: string; archived: boolean }>) {
     const url = new URL(page.url);
     const next = {
       q,
       status,
       priority,
       project,
+      user: owner,
       archived,
       ...patch
     };
     // q
     if (!next.q) url.searchParams.delete('q'); else url.searchParams.set('q', next.q);
     // status / priority — 'any' is default
-    if (next.status === 'any' || !next.status) url.searchParams.delete('status'); else url.searchParams.set('status', next.status);
+    if (next.status === 'active' || !next.status) url.searchParams.delete('status'); else url.searchParams.set('status', next.status);
     if (next.priority === 'any' || !next.priority) url.searchParams.delete('priority'); else url.searchParams.set('priority', next.priority);
     // project — server expects numeric projectId; 'any' is default
     if (!next.project || next.project === 'any') url.searchParams.delete('project'); else url.searchParams.set('project', next.project);
+    // user — numeric ticket author id (admins only); 'any' is default
+    if (!next.user || next.user === 'any') url.searchParams.delete('user'); else url.searchParams.set('user', next.user);
     // archived — server uses '1' (boolean string)
     if (next.archived) url.searchParams.set('archived', '1'); else url.searchParams.delete('archived');
     url.searchParams.delete('page');
@@ -162,32 +179,29 @@
     await invalidateAll();
   }
 
-  async function bulk(op: 'close' | 'reopen' | 'priority' | 'archive' | 'unarchive') {
-    if (!selected.size) return;
-    await fetch('/api/admin/tickets/bulk', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ids: [...selected],
-        op,
-        priority: op === 'priority' ? bulkPriority : undefined
-      })
-    });
+  // Bulk actions live in the shared <BulkActionsBar>; it reports back here.
+  let bulkNotice = $state<string | null>(null);
+  let bulkNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+  async function onBulkDone(info: { message: string }) {
     selected = new Set();
+    bulkNotice = info.message;
+    if (bulkNoticeTimer) clearTimeout(bulkNoticeTimer);
+    bulkNoticeTimer = setTimeout(() => (bulkNotice = null), 6000);
     await invalidateAll();
   }
 
   const pageCount = $derived(Math.max(1, Math.ceil(data.total / data.perPage)));
   const hasFilters = $derived(
-    !!(data.filters.search || (data.filters.status !== 'any') || (data.filters.priority !== 'any') || (data.filters.projectId != null) || data.filters.archived)
+    !!(data.filters.search || !data.filters.statusDefault || (data.filters.priority !== 'any') || (data.filters.projectId != null) || (data.filters.userId != null) || data.filters.archived)
   );
 
   // Count of active (non-default) filters for the mobile "Filters" badge
   const activeFilterCount = $derived(
     (q ? 1 : 0) +
-    (status !== 'any' ? 1 : 0) +
+    (!data.filters.statusDefault ? 1 : 0) +
     (priority !== 'any' ? 1 : 0) +
     (project !== 'any' ? 1 : 0) +
+    (owner !== 'any' ? 1 : 0) +
     (archived ? 1 : 0)
   );
 
@@ -220,7 +234,12 @@
   }
 </script>
 
-<section class="max-w-6xl mx-auto px-6 py-8 lg:px-8">
+<section
+  class="max-w-6xl mx-auto px-6 py-8 lg:px-8"
+  style:padding-bottom={data.isAdmin && selected.size > 0
+    ? 'calc(10rem + env(safe-area-inset-bottom, 0px))'
+    : undefined}
+>
   <header class="flex flex-wrap items-center justify-between gap-3 mb-6"
           in:fly={{ y: -8, duration: 320, easing: cubicOut }}>
     <div>
@@ -249,8 +268,7 @@
   <!-- Filter bar: mobile toggle button (only visible below 640px) -->
   <button
     type="button"
-    class="sm:hidden btn btn-ghost mb-3 flex items-center gap-2"
-    style="height:40px;"
+    class="sm:hidden btn btn-ghost mb-3 flex items-center gap-2 btn-lg"
     aria-expanded={filtersOpen}
     onclick={() => (filtersOpen = !filtersOpen)}
     in:fly={{ y: -4, duration: 280, easing: cubicOut }}
@@ -291,26 +309,29 @@
         />
       </label>
 
-      <select class="select flex-1 min-w-[120px]"
+      <select class="select flex-1 min-w-[150px]"
+              aria-label="Status"
+              title="Active hides closed tickets"
               bind:value={status}
               onchange={() => syncFilters({ status })}>
-        <option value="any">All status</option>
+        <option value="active">Active</option>
         <option value="open">Open</option>
         <option value="pending">Pending</option>
         <option value="closed">Closed</option>
+        <option value="any">All (with closed)</option>
       </select>
 
-      <select class="select flex-1 min-w-[140px]"
+      <select class="select flex-1 min-w-[140px]" aria-label="Priority"
               bind:value={priority}
               onchange={() => syncFilters({ priority })}>
         <option value="any">All priority</option>
-        <option value="urgent">🔥 Urgent</option>
-        <option value="high">⬆️ High</option>
-        <option value="normal">➖ Normal</option>
-        <option value="low">⬇️ Low</option>
+        <option value="urgent">Urgent</option>
+        <option value="high">High</option>
+        <option value="normal">Normal</option>
+        <option value="low">Low</option>
       </select>
 
-      <select class="select flex-1 min-w-[140px]"
+      <select class="select flex-1 min-w-[140px]" aria-label="Project"
               bind:value={project}
               onchange={() => syncFilters({ project })}>
         <option value="any">All projects</option>
@@ -320,61 +341,53 @@
       </select>
 
       {#if data.isAdmin}
+        <select class="select flex-1 min-w-[160px]" aria-label="Filter by user" data-testid="filter-user"
+                bind:value={owner}
+                onchange={() => syncFilters({ user: owner })}>
+          <option value="any">All users</option>
+          {#each data.users as u (u.id)}
+            <option value={String(u.id)}>{u.email}</option>
+          {/each}
+        </select>
+
         <label class="flex items-center gap-2.5 py-2 text-sm text-muted ml-1 select-none cursor-pointer">
-          <input type="checkbox" class="h-5 w-5" bind:checked={archived}
+          <input type="checkbox" bind:checked={archived}
                  onchange={() => syncFilters({ archived })} />
           Show archived
         </label>
       {/if}
 
-      <span class="ml-auto text-fainter text-xs font-mono">{data.total} total</span>
+      <span class="ml-auto text-fainter text-xs num">{data.total} total</span>
     </div>
   </div>
 
-  <!-- Bulk toolbar -->
-  {#if data.isAdmin && selected.size > 0}
-    <div class="glass-strong mt-3 px-3.5 py-2.5 flex items-center gap-3"
-         in:fly={{ y: -6, duration: 220, easing: cubicOut }}>
-      <span class="inline-flex items-center justify-center h-6 min-w-6 px-1.5 rounded-md text-[11px] font-bold"
-            style="background: linear-gradient(135deg, var(--color-accent), var(--color-accent-2)); color: oklch(0.15 0.04 270);">
-        {selected.size}
-      </span>
-      <span class="text-sm font-semibold">selected</span>
+  <!-- Bulk actions (admin) -->
+  {#if data.isAdmin}
+    <BulkActionsBar
+      ids={[...selected]}
+      mode="inbox"
+      archivedView={data.filters.archived}
+      ondone={onBulkDone}
+      onclear={() => (selected = new Set())}
+    />
+  {/if}
 
-      <span class="h-4 w-px" style="background: var(--glass-border);"></span>
-
-      <button type="button" class="btn" style="height:30px;" onclick={() => bulk('close')}>Close</button>
-      <button type="button" class="btn" style="height:30px;" onclick={() => bulk('reopen')}>Reopen</button>
-
-      {#if data.filters.archived}
-        <button type="button" class="btn" style="height:30px;" onclick={() => bulk('unarchive')}>Restore</button>
-      {:else}
-        <button type="button" class="btn" style="height:30px;" onclick={() => bulk('archive')}>Archive</button>
-      {/if}
-
-      <span class="h-4 w-px" style="background: var(--glass-border);"></span>
-
-      <span class="text-fainter text-xs">Set priority</span>
-      <select class="select w-auto" style="height:30px;" bind:value={bulkPriority}>
-        <option value="urgent">🔥 Urgent</option>
-        <option value="high">⬆️ High</option>
-        <option value="normal">➖ Normal</option>
-        <option value="low">⬇️ Low</option>
-      </select>
-      <button type="button" class="btn" style="height:30px;" onclick={() => bulk('priority')}>Apply</button>
-
-      <span class="ml-auto"></span>
-      <button type="button" class="btn btn-ghost" style="height:30px;" onclick={() => (selected = new Set())}>Clear</button>
-    </div>
+  {#if bulkNotice}
+    <p class="glass mt-3 px-4 py-2.5 text-sm" role="status" data-testid="bulk-notice">{bulkNotice}</p>
   {/if}
 
   <!-- List -->
   {#if data.tickets.length === 0}
     <div class="glass mt-6 py-20 px-6 text-center"
          in:fly={{ y: 8, duration: 380, easing: cubicOut }}>
-      <div class="anim-float mx-auto mb-5 h-16 w-16 rounded-full"
-           style="background: conic-gradient(from 220deg, var(--color-accent), var(--color-accent-2), var(--color-accent));
-                  filter: blur(0.5px); opacity: 0.85;"></div>
+      <div class="mx-auto mb-5 h-14 w-14 rounded-2xl flex items-center justify-center"
+           style="background: var(--accent-wash); color: var(--color-accent); border: 1px solid var(--accent-line);">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+          <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+        </svg>
+      </div>
       <div class="text-lg font-bold tracking-tight mb-1">
         {hasFilters ? 'Nothing matches those filters' : 'No tickets yet'}
       </div>
@@ -390,20 +403,16 @@
       {/if}
     </div>
   {:else}
-    <ul class="space-y-3 mt-4">
-      {#each data.tickets as t, i (t.id)}
+    <ul class="glass inbox-list mt-4 anim-fade-in" class:has-selection={selected.size > 0} data-testid="inbox-list">
+      {#each data.tickets as t (t.id)}
         {@const myTasks = tasksFor(t.id)}
-        <li class="relative group anim-slide-up"
-            style="animation-delay: {Math.min(i, 12) * 25}ms;">
+        <li class="group inbox-row" class:is-selected={selected.has(t.id)}>
           <article
-            class="glass relative px-4 py-3.5 transition-all duration-300 hover:scale-[1.005]"
-            class:ring={selected.has(t.id)}
+            class="relative px-4 py-3.5"
+            class:is-selected={selected.has(t.id)}
             class:tk-unread={t.unread_count > 0}
             class:tk-task={myTasks.length > 0}
             class:tk-archived={t.archived_at != null}
-            style={selected.has(t.id)
-              ? 'border-color: oklch(0.74 0.18 295 / 0.45); background: oklch(0.74 0.18 295 / 0.06);'
-              : ''}
           >
             <a
               href={`/tickets/${t.id}`}
@@ -413,14 +422,13 @@
 
             <div class="relative z-10 flex items-start gap-3 pointer-events-none">
               {#if data.isAdmin}
-                <span class="mt-1 pointer-events-auto">
+                <span class="mt-1 pointer-events-auto row-check">
                   <input
                     type="checkbox"
                     aria-label="Select ticket {t.id}"
                     checked={selected.has(t.id)}
                     onchange={() => toggleOne(t.id)}
                     onclick={(e) => e.stopPropagation()}
-                    class="h-5 w-5"
                   />
                 </span>
               {/if}
@@ -430,11 +438,11 @@
                   {#if t.unread_count > 0}
                     <span
                       class="unread-dot"
-                      aria-label={t.unread_count > 9 ? 'more than 9 unread messages' : `${t.unread_count} unread messages`}
+                      aria-hidden="true"
                       title={t.unread_count > 9 ? '9+ unread' : `${t.unread_count} unread`}
                     ></span>
                   {/if}
-                  <span class="font-mono text-fainter text-[11px]">#{t.id}</span>
+                  <span class="num text-fainter text-[11px]">#{t.id}</span>
                   <span class="chip chip-{t.status}">
                     <span class="inline-block w-1.5 h-1.5 rounded-full"
                           style="background: currentColor;"></span>
@@ -523,7 +531,7 @@
                       </svg>
                     </button>
                   {/if}
-                  <div class="text-muted font-mono text-[11.5px]">{relTime(t.updated_at)}</div>
+                  <div class="text-muted num text-[11.5px]">{relTime(t.updated_at)}</div>
                 </div>
                 <div class="text-fainter text-[11.5px]">
                   {t.message_count} message{t.message_count === 1 ? '' : 's'}
@@ -553,16 +561,24 @@
 
     {#if pageCount > 1}
       <nav class="flex items-center justify-center gap-3 mt-6 relative z-[250]" aria-label="Pagination">
-        <button type="button" class="btn btn-ghost" style="height:32px;"
+        <button type="button" class="btn btn-ghost btn-sm"
                 onclick={() => goto(`?${new URLSearchParams({ ...Object.fromEntries(page.url.searchParams), page: String(Math.max(1, data.page - 1)) })}`)}
                 disabled={data.page <= 1}>
-          ← Prev
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Prev
         </button>
-        <span class="text-muted text-xs font-mono">Page {data.page} of {pageCount}</span>
-        <button type="button" class="btn" style="height:32px;"
+        <span class="text-muted text-xs num">Page {data.page} of {pageCount}</span>
+        <button type="button" class="btn btn-sm"
                 onclick={() => goto(`?${new URLSearchParams({ ...Object.fromEntries(page.url.searchParams), page: String(Math.min(pageCount, data.page + 1)) })}`)}
                 disabled={!data.hasMore}>
-          Next →
+          Next
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
         </button>
       </nav>
     {/if}
@@ -589,7 +605,7 @@
     aria-live="polite"
   >
     <div class="glass-strong p-3 rounded-xl shadow-xl">
-      <div class="flex items-center gap-1.5 mb-1.5 text-[10.5px] font-mono uppercase tracking-wider"
+      <div class="flex items-center gap-1.5 mb-1.5 text-[10.5px] font-semibold uppercase tracking-wider"
            style="color: oklch(0.78 0.16 75);">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -610,3 +626,4 @@
     </div>
   </div>
 {/if}
+

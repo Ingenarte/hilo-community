@@ -1,6 +1,7 @@
 // Scene metadata for the Promo composition. Durations are in frames at 30 fps
-// and MUST stay in sync with video-remotion/NARRATION.md — each narration
-// paragraph is written to fit its scene's duration.
+// and are derived from the HeyGen narration track's chapter timestamps
+// (public/heygen/narration.srt). If the narration is re-recorded, update the
+// start times below to match the new SRT.
 
 export const FPS = 30;
 
@@ -24,8 +25,27 @@ export type FeatureData = {
   durationInFrames: number;
 };
 
-export const INTRO_FRAMES = 15 * FPS; // 450
-export const OUTRO_FRAMES = 15 * FPS; // 450
+// Chapter start times (seconds) in public/heygen/narration.mp4.
+const T = {
+  intro: 0,
+  f01: 15.52,
+  f02: 31.45,
+  f03: 47.18,
+  f04: 60.88,
+  f05: 74.69,
+  f06: 86.43,
+  f07: 102.06,
+  f08: 114.95,
+  f09: 128.3,
+  f10: 140.89,
+  outro: 151.65,
+  end: 166.6
+};
+
+const frames = (from: number, to: number) => Math.round((to - from) * FPS);
+
+export const INTRO_FRAMES = frames(T.intro, T.f01);
+export const OUTRO_FRAMES = frames(T.outro, T.end);
 
 export const FEATURES: FeatureData[] = [
   {
@@ -37,7 +57,7 @@ export const FEATURES: FeatureData[] = [
       'Typing indicators, reactions, message editing',
     ],
     visual: 'chat',
-    durationInFrames: 14 * FPS,
+    durationInFrames: frames(T.f01, T.f02),
   },
   {
     index: 2,
@@ -48,7 +68,7 @@ export const FEATURES: FeatureData[] = [
       'Dictation streams speech straight into the composer',
     ],
     visual: 'wave',
-    durationInFrames: 14 * FPS,
+    durationInFrames: frames(T.f02, T.f03),
   },
   {
     index: 3,
@@ -59,7 +79,7 @@ export const FEATURES: FeatureData[] = [
       'Inline images and seekable video previews',
     ],
     visual: 'upload',
-    durationInFrames: 13 * FPS,
+    durationInFrames: frames(T.f03, T.f04),
   },
   {
     index: 4,
@@ -70,7 +90,7 @@ export const FEATURES: FeatureData[] = [
       'Inbox eye: has the user seen your reply?',
     ],
     visual: 'checks',
-    durationInFrames: 12 * FPS,
+    durationInFrames: frames(T.f04, T.f05),
   },
   {
     index: 5,
@@ -81,7 +101,7 @@ export const FEATURES: FeatureData[] = [
       'Tick done — everyone sees it instantly',
     ],
     visual: 'tasks',
-    durationInFrames: 12 * FPS,
+    durationInFrames: frames(T.f05, T.f06),
   },
   {
     index: 6,
@@ -92,7 +112,7 @@ export const FEATURES: FeatureData[] = [
       'Inbound email becomes a ticket (IMAP)',
     ],
     visual: 'mail',
-    durationInFrames: 14 * FPS,
+    durationInFrames: frames(T.f06, T.f07),
   },
   {
     index: 7,
@@ -103,7 +123,7 @@ export const FEATURES: FeatureData[] = [
       'Daily digest throttling — never spammed',
     ],
     visual: 'bell',
-    durationInFrames: 12 * FPS,
+    durationInFrames: frames(T.f07, T.f08),
   },
   {
     index: 8,
@@ -114,7 +134,7 @@ export const FEATURES: FeatureData[] = [
       'Health endpoint and Prometheus metrics',
     ],
     visual: 'admin',
-    durationInFrames: 13 * FPS,
+    durationInFrames: frames(T.f08, T.f09),
   },
   {
     index: 9,
@@ -125,7 +145,7 @@ export const FEATURES: FeatureData[] = [
       'Dark & light themes, four accent colors',
     ],
     visual: 'devices',
-    durationInFrames: 12 * FPS,
+    durationInFrames: frames(T.f09, T.f10),
   },
   {
     index: 10,
@@ -136,7 +156,7 @@ export const FEATURES: FeatureData[] = [
       'Slack / Discord / generic webhooks',
     ],
     visual: 'search',
-    durationInFrames: 10 * FPS,
+    durationInFrames: frames(T.f10, T.outro),
   },
 ];
 

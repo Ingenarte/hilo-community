@@ -101,6 +101,45 @@
     await invalidateAll();
   }
 
+  // ── Reset password modal (two-step confirmation) ────────────────────────────
+  let resetModalUser = $state<User | null>(null);
+  let resetting = $state(false);
+  let resetError = $state<string | null>(null);
+  let resetDone = $state(false);
+
+  function openResetModal(u: User) {
+    resetModalUser = u;
+    resetting = false;
+    resetError = null;
+    resetDone = false;
+  }
+
+  function closeResetModal() {
+    resetModalUser = null;
+    resetError = null;
+    resetDone = false;
+  }
+
+  async function confirmResetPassword() {
+    if (!resetModalUser) return;
+    // Second confirmation gate, on top of the modal itself.
+    if (!confirm(`Email ${resetModalUser.email} a link to choose a new password?`)) return;
+    resetting = true;
+    resetError = null;
+    const r = await fetch('/api/admin/users', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: resetModalUser.id, op: 'reset_password' })
+    });
+    resetting = false;
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      resetError = body.error || 'Failed to reset password';
+      return;
+    }
+    resetDone = true;
+  }
+
   function fmtTime(unix: number | null) {
     if (!unix) return '—';
     return new Date(unix * 1000).toLocaleString([], {
@@ -289,7 +328,7 @@
         </span>
       {/each}
       {#if stats.usesPwa}
-        <span class="chip" style="background: oklch(0.74 0.18 295 / 0.18); border-color: oklch(0.74 0.18 295 / 0.4);"
+        <span class="chip" style="background: var(--accent-wash-strong); border-color: var(--accent-line);"
               aria-label="Uses installed PWA at least once">
           <span class="text-[11px]">PWA</span>
         </span>
@@ -376,6 +415,9 @@
                 <button class="link text-xs" onclick={() => toggleUser(u)}>
                   {u.disabled_at ? 'Enable' : 'Disable'}
                 </button>
+                <button class="link text-xs" onclick={() => openResetModal(u)}>
+                  Reset password
+                </button>
                 {#if u.id !== data.currentUserId}
                   <button
                     class="link text-xs"
@@ -436,6 +478,9 @@
           </button>
           <button class="btn btn-ghost h-9 flex-1 text-xs" onclick={() => toggleUser(u)}>
             {u.disabled_at ? 'Enable' : 'Disable'}
+          </button>
+          <button class="btn btn-ghost h-9 flex-1 text-xs" onclick={() => openResetModal(u)}>
+            Reset password
           </button>
           {#if u.id !== data.currentUserId}
             <button
@@ -647,6 +692,64 @@
       <div class="flex justify-end mt-5">
         <button class="btn" onclick={() => (devicesDrawerFor = null)}>Close</button>
       </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Reset password modal -->
+{#if resetModalUser}
+  <div
+    use:portal
+    class="fixed inset-0 z-200 flex items-start justify-center px-4 pb-4 overflow-y-auto"
+    style="padding-top: 10vh;"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="reset-password-title"
+    transition:fade={{ duration: 160 }}
+  >
+    <button
+      type="button"
+      class="absolute inset-0 cursor-default border-0 bg-black/50 p-0"
+      aria-label="Dismiss"
+      tabindex="-1"
+      onclick={closeResetModal}
+    ></button>
+
+    <div class="glass relative z-10 w-full max-w-md p-6 rounded-xl" transition:fly={{ y: 12, duration: 200, easing: cubicOut }}>
+      <h2 id="reset-password-title" class="text-lg font-semibold mb-3">Reset password</h2>
+
+      {#if resetDone}
+        <p class="text-sm text-muted mb-4">
+          A link to choose a new password was emailed to <strong>{resetModalUser.email}</strong>.
+          Their previous password and any passkeys no longer work and their sessions were revoked.
+        </p>
+        <div class="flex justify-end">
+          <button class="btn btn-primary" onclick={closeResetModal}>Close</button>
+        </div>
+      {:else}
+        <p class="text-sm text-muted mb-4">
+          This will invalidate the current password and passkeys of <strong>{resetModalUser.email}</strong>,
+          revoke all of their active sessions and email them a link (valid 24 hours) to choose a new one.
+        </p>
+
+        {#if resetError}
+          <p class="text-sm mb-3" style="color: var(--color-danger);">{resetError}</p>
+        {/if}
+
+        <div class="flex justify-end gap-2">
+          <button type="button" class="btn" onclick={closeResetModal} disabled={resetting}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            disabled={resetting}
+            onclick={confirmResetPassword}
+          >
+            {resetting ? 'Sending…' : 'Reset password'}
+          </button>
+        </div>
+      {/if}
     </div>
   </div>
 {/if}

@@ -218,9 +218,9 @@
 
   <!-- Secondary nav -->
   <nav class="glass-subtle p-2 flex flex-wrap gap-1 mb-6 text-sm">
-    <a class="btn btn-ghost" style="height:30px;" href="/admin/users">Users</a>
-    <a class="btn btn-ghost" style="height:30px;" href="/admin/audit">Audit log</a>
-    <a class="btn btn-ghost" style="height:30px;" href="/admin/outbox">Outbox</a>
+    <a class="btn btn-ghost btn-sm" href="/admin/users">Users</a>
+    <a class="btn btn-ghost btn-sm" href="/admin/audit">Audit log</a>
+    <a class="btn btn-ghost btn-sm" href="/admin/outbox">Outbox</a>
   </nav>
 
   <div class="grid gap-5 lg:grid-cols-2">
@@ -256,7 +256,7 @@
             type="button"
             class="btn"
             style={active
-              ? 'border-color: var(--color-accent); background: oklch(0.74 0.18 295 / 0.08);'
+              ? 'border-color: var(--color-accent); background: var(--accent-wash);'
               : ''}
             onclick={() => setAccent(a.id)}
             aria-pressed={active}
@@ -439,7 +439,7 @@
               </select></td>
               <td class="py-2 pr-3"><input class="input" style="height:30px;" placeholder="ticket.new,ticket.urgent" bind:value={whEvents} /></td>
               <td></td>
-              <td class="py-2 pr-3 text-right"><button class="btn" style="height:30px;" onclick={addWebhook}>Add</button></td>
+              <td class="py-2 pr-3 text-right"><button class="btn btn-sm" onclick={addWebhook}>Add</button></td>
             </tr>
             <tr><td colspan="5" class="py-2 pr-3">
               <input class="input" placeholder="https://hooks.slack.com/services/…" bind:value={whUrl} />

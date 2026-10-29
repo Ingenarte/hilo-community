@@ -38,7 +38,7 @@
 
 <button
   type="button"
-  class="btn btn-ghost relative h-9 w-9 !p-0 overflow-hidden"
+  class="btn btn-ghost btn-lg btn-icon relative overflow-hidden"
   aria-label={effective === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
   onclick={toggle}
   disabled={busy}

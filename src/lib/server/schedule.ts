@@ -56,9 +56,9 @@ const WEEKDAYS_INT: Record<string, number> = {
 	Sat: 6
 };
 
-type Parts = { weekday: number; year: number; month: number; day: number; hour: number; minute: number };
+export type Parts = { weekday: number; year: number; month: number; day: number; hour: number; minute: number };
 
-function parseInTz(d: Date, tz: string): Parts {
+export function parseInTz(d: Date, tz: string): Parts {
 	const fmt = new Intl.DateTimeFormat('en-US', {
 		timeZone: tz,
 		weekday: 'short',

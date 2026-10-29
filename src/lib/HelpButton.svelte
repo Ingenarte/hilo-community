@@ -229,8 +229,7 @@
 <button
 	bind:this={triggerRef}
 	type="button"
-	class="btn btn-ghost"
-	style="height:40px; width:40px; padding:0;"
+	class="btn btn-ghost btn-lg btn-icon"
 	aria-label="Help — install Hilo on your devices"
 	aria-haspopup="dialog"
 	aria-expanded={open}

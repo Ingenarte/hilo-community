@@ -45,3 +45,30 @@ export function consumeMagicLink(token: string): ConsumedMagic {
 	db.prepare('UPDATE magic_links SET used_at = unixepoch() WHERE token = ?').run(token);
 	return { user_id: row.user_id, ticket_id: row.ticket_id };
 }
+
+export type PeekedMagic = {
+	user_id: number;
+	ticket_id: number | null;
+	/** True while the link can still sign someone in. */
+	usable: boolean;
+} | null;
+
+/**
+ * Looks at a link WITHOUT using it, so mail scanners and link previews that
+ * open it do not burn it. The target stays known even when the link is spent,
+ * so the person can be sent to the conversation after a normal sign-in.
+ */
+export function peekMagicLink(token: string): PeekedMagic {
+	const row = db
+		.prepare(`SELECT user_id, ticket_id, expires_at, used_at FROM magic_links WHERE token = ?`)
+		.get(token) as
+		| { user_id: number; ticket_id: number | null; expires_at: number; used_at: number | null }
+		| undefined;
+	if (!row) return null;
+	const now = Math.floor(Date.now() / 1000);
+	return {
+		user_id: row.user_id,
+		ticket_id: row.ticket_id,
+		usable: row.expires_at >= now && !row.used_at
+	};
+}

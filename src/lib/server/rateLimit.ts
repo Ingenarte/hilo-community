@@ -7,7 +7,7 @@
  *   - On every hit, if the window has expired the row is reset; otherwise
  *     count is incremented atomically via a single UPDATE.
  *   - Stale rows are lazily cleaned up on every hit (DELETE WHERE window
- *     expired more than 2× the window length ago — avoids table bloat
+ *     older than max(2x the window, CLEANUP_RETENTION_SECONDS) — avoids table bloat
  *     without requiring a separate cron).
  *
  * Falls back to the legacy in-memory map if db is unavailable (import
@@ -16,6 +16,9 @@
 
 import { db } from './db';
 import { log } from './logger';
+
+/** Rows are kept at least this long; must exceed 2x the longest window in use. */
+const CLEANUP_RETENTION_SECONDS = 2 * 86400;
 
 export type RateLimitResult = {
 	ok: boolean;
@@ -70,9 +73,13 @@ export function rateLimit(
 		const stmts = getStmts();
 		const now = Math.floor(Date.now() / 1000);
 
-		// Lazy cleanup: delete rows whose window expired more than windowSeconds
-		// ago. This keeps the table from growing unbounded without a cron job.
-		stmts.cleanup.run({ threshold: now - windowSeconds * 2 });
+		// Lazy cleanup keeps the table from growing unbounded without a cron job.
+		// The threshold must not depend on the caller's window: a 60 s limiter
+		// would otherwise delete the rows of every 1 h limiter after 120 s and
+		// silently reset their counters. Retain at least CLEANUP_RETENTION_SECONDS.
+		stmts.cleanup.run({
+			threshold: now - Math.max(windowSeconds * 2, CLEANUP_RETENTION_SECONDS)
+		});
 
 		const row = stmts.get.get({ key }) as
 			| { count: number; window_start: number }
@@ -99,6 +106,41 @@ export function rateLimit(
 			err: err instanceof Error ? err.message : String(err)
 		});
 		return { ok: true, remaining: maxRequests, retryAfterSeconds: 0 };
+	}
+}
+
+/**
+ * Read-only look at a counter: has `key` already used up `maxRequests` in its
+ * current window? Unlike `rateLimit` it never increments, so callers can check
+ * a lockout first and only count the events that should count (e.g. failures).
+ */
+export function rateLimitStatus(
+	key: string,
+	maxRequests: number,
+	windowSeconds: number
+): { blocked: boolean; retryAfterSeconds: number } {
+	try {
+		const row = getStmts().get.get({ key }) as { count: number; window_start: number } | undefined;
+		const now = Math.floor(Date.now() / 1000);
+		if (!row || now - row.window_start >= windowSeconds || row.count < maxRequests) {
+			return { blocked: false, retryAfterSeconds: 0 };
+		}
+		return {
+			blocked: true,
+			retryAfterSeconds: Math.max(1, windowSeconds - (now - row.window_start))
+		};
+	} catch {
+		// Same fail-open policy as rateLimit().
+		return { blocked: false, retryAfterSeconds: 0 };
+	}
+}
+
+/** Forget a counter (e.g. wrong-password count after a successful sign-in). */
+export function clearRateLimit(key: string): void {
+	try {
+		db.prepare('DELETE FROM rate_limits WHERE key = ?').run(key);
+	} catch {
+		// ignore
 	}
 }
 
