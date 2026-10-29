@@ -14,7 +14,7 @@
 
 Hilo gives you a URL where invited users can sign in, open tickets, and have
 a threaded chat with you. Every reply can send a rich, themed email with a
-tokenised link — one click and the recipient is signed in, looking at the
+tokenised link - one click and the recipient is signed in, looking at the
 conversation.
 
 It's a **no-frills alternative to Chatwoot or Freescout** for the
@@ -37,7 +37,7 @@ It's a **no-frills alternative to Chatwoot or Freescout** for the
 | Webhooks | Slack/Discord/custom | Slack/Discord/custom |
 | FTS search | yes | yes (SQLite FTS5) |
 
-Pick Hilo when you want something **small, boring, restartable — fits in one
+Pick Hilo when you want something **small, boring, restartable - fits in one
 `git clone`** and runs on the cheapest VPS you can find.
 
 ---
@@ -55,14 +55,14 @@ pnpm dev                         # http://localhost:5180
 The first request creates the SQLite file, seeds the default project, and
 provisions the admin user from `ADMIN_EMAIL`.
 
-For production the Docker stack is the recommended path — it includes the
+For production the Docker stack is the recommended path - it includes the
 transcription sidecar:
 
 ```bash
 docker compose up -d             # app on :3000, whisper sidecar internal
 ```
 
-Or bare-metal: `pnpm build && NODE_ENV=production pnpm start`, dropped
+Or bare-metal (needs Node 20+ and `ffmpeg` on the PATH for voice-message playback on iPhone): `pnpm build && NODE_ENV=production pnpm start`, dropped
 behind Caddy / nginx (templates in [`deploy/`](deploy/)).
 
 ---
@@ -72,7 +72,7 @@ behind Caddy / nginx (templates in [`deploy/`](deploy/)).
 - **Tickets + realtime chat.** One thread per topic, live over Server-Sent
   Events, with typing indicators, reactions and message editing.
 - **Voice messages + self-hosted transcription.** Record up to 2 minutes,
-  transcribe with one tap on a local faster-whisper sidecar — audio never
+  transcribe with one tap on a local faster-whisper sidecar - audio never
   leaves your server. Dictation mode streams speech into the composer.
 - **Resumable uploads up to 500 MB.** Chunked (tus-style), survives page
   reloads and flaky connections. Inline image previews, seekable in-browser
@@ -82,16 +82,32 @@ behind Caddy / nginx (templates in [`deploy/`](deploy/)).
 - **Tasks inside tickets.** Create, assign to any participant, tick done;
   pending-task chips surface in the inbox.
 - **Magic-link email notifications.** Every reply emails a tokenised URL that
-  signs the recipient in and lands on the conversation. Emails are themed
-  (dark/light), embed images inline and show file chips.
+  signs the recipient in and lands on the conversation. The link opens a
+  confirmation page first, so mail scanners that prefetch URLs cannot use up
+  the single-use token. An expired link sends the person to the login and
+  then on to the same conversation. Emails are themed (dark/light), embed
+  images inline and show file chips.
+- **Passkeys and password links.** Sign in with a fingerprint, face or screen
+  lock (WebAuthn, needs HTTPS). Admins can send one-time password links, force
+  a password change on first sign-in, and new passwords are screened against
+  known breaches.
+- **Deadline reminders.** Each priority has a response target (urgent 24 h,
+  high 48 h, normal 72 h, low 96 h) that restarts with every public message.
+  Everyone gets a due-soon alert, a weekday digest and a weekly overdue
+  summary by email, and can tune or switch them off in Preferences. Admins
+  can extend a deadline with a written reason.
+- **Agent tokens and API.** Per-user tokens let scripts and AI agents read and
+  reply to tickets through `/api/v1`.
 - **Inbound email → ticket** (IMAP polling).
 - **Web Push notifications** (VAPID) with per-user quiet hours and daily
   digest throttling.
 - **Projects & groups.** Organize tickets per project, group users, CSV
   import, merge, per-user project assignment.
 - **Ticket lifecycle**: status, priority (low → urgent), assignment, internal
-  notes, followers/CC, archive/restore, bulk admin actions, canned response
-  templates.
+  notes, followers/CC, archive/restore, canned response templates. The admin
+  queue selects many tickets at once to close, reopen, archive, change
+  priority or extend time. Closed tickets are frozen for users (read-only,
+  only an admin can reopen) and are hidden from the default inbox.
 - **Admin console**: multi-admin, user management with device-class insights,
   audit log viewer, email outbox with retries, workspace CSV export.
 - **Outbound webhooks** (Slack, Discord, generic JSON) on
@@ -138,23 +154,27 @@ behind Caddy / nginx (templates in [`deploy/`](deploy/)).
 ## Configuration
 
 All variables live in `.env` (copy `.env.example` and edit). The
-highlights — see the example file for the full annotated set.
+highlights - see the example file for the full annotated set.
 
 | Variable | Required | Default | Meaning |
 |---|:---:|---|---|
 | `PUBLIC_BASE_URL` | yes | `http://localhost:5180` | Magic links, CSRF origin, install-guide copy. |
 | `PUBLIC_BRAND` | no | `Hilo` | Short label across UI/email. |
-| `PUBLIC_SUPPORT_EMAIL` | no | — | Invite contact shown on the login page. |
-| `PUBLIC_INSTANCE_OWNER` | no | — | Organization name shown on the landing page. |
-| `ADMIN_EMAIL` | yes | — | The first admin user (auto-created). |
-| `AUTH_FIXED_PASSWORD` | yes | — | Bootstrap password; users get individual passwords. |
+| `PUBLIC_SUPPORT_EMAIL` | no | - | Invite contact shown on the login page. |
+| `PUBLIC_INSTANCE_OWNER` | no | - | Organization name shown on the landing page. |
+| `ADMIN_EMAIL` | yes | - | The first admin user (auto-created). |
+| `AUTH_FIXED_PASSWORD` | yes | - | Bootstrap password; users get individual passwords. |
 | `AUTH_DYNAMIC_FORMAT` | no | `ddmmyy` | Optional date-derived second factor (`none` to disable). |
-| `SESSION_SECRET` | yes | — | 48+ random bytes. |
-| `SMTP_*` | yes | — | Gmail App Password is the easy path. |
-| `VAPID_*` | no | — | Web Push keys (`npx web-push generate-vapid-keys`). |
+| `SESSION_SECRET` | yes | - | 48+ random bytes. |
+| `SMTP_*` | yes | - | Gmail App Password is the easy path. |
+| `VAPID_*` | no | - | Web Push keys (`npx web-push generate-vapid-keys`). |
 | `MAX_UPLOAD_MB` | no | `500` | Per-attachment total cap (chunked). |
 | `UPLOAD_RETAIN_DAYS` | no | `180` | Attachment retention; 0 = keep forever. |
 | `WHISPER_URL` | no | sidecar | Transcription service endpoint. |
+| `PASSKEYS_ENABLED` | no | `1` | Set `0` to turn passkey sign-in off. |
+| `REMINDERS_ENABLED` | no | `1` | Set `0` to switch deadline reminder emails off. |
+| `DEFAULT_TIMEZONE` | no | `Europe/Rome` | Time zone for reminder schedules when a user has none. |
+| `PWNED_PASSWORDS_CHECK` | no | `1` | Set `0` to skip the breached-password check. |
 
 ---
 
@@ -183,8 +203,8 @@ for the narration script and HeyGen avatar slots.
 
 ## Health & observability
 
-- `GET /api/health` — JSON liveness probe (status, uptime, pid).
-- `GET /api/metrics` — Prometheus exposition (ticket counts, message
+- `GET /api/health` - JSON liveness probe (status, uptime, pid).
+- `GET /api/metrics` - Prometheus exposition (ticket counts, message
   counts, attachment bytes, sessions, pending magic links, uptime).
 - Structured JSON access log to stdout, one line per request.
 - `X-Request-Id` header on every response.
@@ -193,12 +213,14 @@ for the narration script and HeyGen avatar slots.
 
 ## Security posture
 
-Hilo targets the "invited guests on a private URL" regime — it is not the
+Hilo targets the "invited guests on a private URL" regime - it is not the
 front gate of anything sensitive. What it does protect:
 
 - Per-user scrypt password hashes; brute-force limits on `/login` and `/m/<token>`
 - Honeypot field traps the cheapest bots
-- Single-use magic-link tokens, 30-day TTL
+- Single-use magic-link tokens, 30-day TTL, safe against link scanners
+- Passkeys (WebAuthn), breached-password screening, failed-login lockout
+- Open-redirect protection on post-login destinations
 - XSS-safe message rendering (escape-then-linkify)
 - Authorised attachment fetch (per-request DB join)
 - Upload MIME allow-list + size caps
