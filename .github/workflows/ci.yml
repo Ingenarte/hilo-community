@@ -30,7 +30,7 @@ jobs:
       SMTP_FROM: ci@example.com
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Version comes from package.json "packageManager".
       - uses: pnpm/action-setup@v4
