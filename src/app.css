@@ -715,7 +715,7 @@ body::before {
     align-items: center;
     gap: 0.3em;
     min-height: 1.5rem;
-    color: var(--color-fainter);
+    color: var(--color-muted);
     text-decoration: none;
     border-radius: 6px;
     transition: color 180ms cubic-bezier(0.16, 1, 0.3, 1);
