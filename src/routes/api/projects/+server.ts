@@ -14,7 +14,7 @@ export const GET: RequestHandler = ({ locals }) => {
 	if (locals.user.role === 'admin') {
 		const rows = db
 			.prepare(
-				`SELECT id, name, slug, status FROM projects WHERE status != 'archived' ORDER BY name`
+				`SELECT id, name, slug, status FROM projects WHERE status NOT IN ('archived', 'pending') ORDER BY name`
 			)
 			.all();
 		return json({ projects: rows });
@@ -25,7 +25,7 @@ export const GET: RequestHandler = ({ locals }) => {
 			`SELECT p.id, p.name, p.slug, p.status
 			 FROM projects p
 			 JOIN user_projects up ON up.project_id = p.id
-			 WHERE up.user_id = ? AND p.status != 'archived'
+			 WHERE up.user_id = ? AND p.status NOT IN ('archived', 'pending')
 			 ORDER BY p.name`
 		)
 		.all(locals.user.id);

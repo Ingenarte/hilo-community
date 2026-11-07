@@ -19,6 +19,7 @@ import { db } from './db';
 import { drain, enqueueEmail } from './mailQueue';
 import { nextSendTime } from './schedule';
 import { canSendToday, markSent } from './email-throttle';
+import { getEmailDailyCap } from './deliveryPolicy';
 import { fmtBytes, escapeHtml, iconForMime, truncate } from './utils';
 
 const MAX_INLINE_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -300,10 +301,18 @@ export function renderEmailHtml(args: RenderEmailArgs): string {
  * schedule window and get a stripped-down body without the magic-link.
  */
 export async function sendMessageNotification(
-	args: NotifyArgs & { extraRecipients?: string[] }
+	args: Omit<NotifyArgs, 'to' | 'recipientUserId'> & {
+		/** null: only the plain-email CC list is sent (the primary person gets push instead). */
+		to: string | null;
+		recipientUserId: number;
+		extraRecipients?: string[];
+	}
 ): Promise<void> {
-	const token = createMagicLink(args.recipientUserId, args.ticketId);
-	const url = magicLinkUrl(token);
+	const primary = args.to !== null;
+	const token = primary ? createMagicLink(args.recipientUserId, args.ticketId) : null;
+	const url = token
+		? magicLinkUrl(token)
+		: `${config.publicBaseUrl.replace(/\/$/, '')}/tickets/${args.ticketId}`;
 	const preview = truncate(args.preview);
 	const isAdminAuthor = args.authorRole === 'admin';
 	const subject = `[${config.brand}] #${args.ticketId} · ${args.ticketTitle}`;
@@ -367,25 +376,28 @@ export async function sendMessageNotification(
 	// timezone. In-app SSE and web push are NOT affected — only email is gated.
 	// markSent is stamped BEFORE enqueueEmail so that a failure at enqueue time
 	// fails closed (one skipped email) rather than open (duplicate emails).
-	if (!canSendToday(args.recipientUserId, 'message-unread', scheduleKey)) {
+	// The cap is an admin option (off by default) and only limits the primary recipient.
+	if (primary && getEmailDailyCap() && !canSendToday(args.recipientUserId, 'message-unread', scheduleKey)) {
 		console.log(
 			`[email] throttled message-unread email for user ${args.recipientUserId}` +
 				` (already sent today in schedule "${scheduleKey}")`
 		);
 		return;
 	}
-	markSent(args.recipientUserId, 'message-unread');
+	if (primary) markSent(args.recipientUserId, 'message-unread');
 
 	const sendAfter = nextSendTime(scheduleKey);
-	enqueueEmail({
-		userId: args.recipientUserId,
-		to: args.to,
-		subject,
-		text,
-		html,
-		attachments: mailAttachments,
-		sendAfter
-	});
+	if (args.to !== null) {
+		enqueueEmail({
+			userId: args.recipientUserId,
+			to: args.to,
+			subject,
+			text,
+			html,
+			attachments: mailAttachments,
+			sendAfter
+		});
+	}
 
 	// Plain-email CC list (followers without a Hilo account): same body
 	// but the magic-link button is stripped — they can't auto-login.
@@ -472,5 +484,41 @@ export async function sendTaskNotification(args: {
 		html,
 		sendAfter
 	});
+	void drain();
+}
+
+/** Email for "the ticket moved" events (status, priority, assignment, deadline, project). */
+export async function sendMovementNotification(args: {
+	to: string;
+	recipientUserId: number;
+	ticketId: number;
+	ticketTitle: string;
+	actorEmail: string;
+	summary: string;
+}): Promise<void> {
+	const token = createMagicLink(args.recipientUserId, args.ticketId);
+	const url = magicLinkUrl(token);
+	const subject = `[${config.brand}] #${args.ticketId} · ${args.ticketTitle}`;
+	const text = [
+		`${args.summary} on ticket #${args.ticketId} - ${args.ticketTitle}`,
+		`Changed by ${args.actorEmail}.`,
+		'',
+		'Open the conversation:',
+		url
+	].join('\n');
+	const html = renderEmailHtml({
+		theme: 'dark',
+		brand: config.brand,
+		ticketId: args.ticketId,
+		title: args.ticketTitle,
+		authorLabel: `${escapeHtml(args.actorEmail)} updated the ticket`,
+		previewHtml: `<strong>${escapeHtml(args.summary)}</strong>`,
+		inlineImages: [],
+		otherFiles: [],
+		url,
+		publicBaseUrl: config.publicBaseUrl
+	});
+	const sendAfter = nextSendTime(getUserSchedule(args.recipientUserId));
+	enqueueEmail({ userId: args.recipientUserId, to: args.to, subject, text, html, sendAfter });
 	void drain();
 }

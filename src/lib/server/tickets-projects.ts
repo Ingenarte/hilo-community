@@ -102,10 +102,10 @@ export function listProjects(): DBProject[] {
 	return db.prepare('SELECT * FROM projects ORDER BY name').all() as DBProject[];
 }
 
-/** Projects that accept new tickets (admin catalogue minus archived). */
+/** Projects that accept new tickets (admin catalogue minus archived and awaiting approval). */
 export function listActiveProjects(): DBProject[] {
 	return db
-		.prepare(`SELECT * FROM projects WHERE status != 'archived' ORDER BY name`)
+		.prepare(`SELECT * FROM projects WHERE status NOT IN ('archived', 'pending') ORDER BY name`)
 		.all() as DBProject[];
 }
 
@@ -119,7 +119,7 @@ export function listProjectsForUser(userId: number): DBProject[] {
 		.prepare(
 			`SELECT p.* FROM projects p
 			 JOIN user_projects up ON up.project_id = p.id
-			 WHERE up.user_id = ? AND p.status != 'archived'
+			 WHERE up.user_id = ? AND p.status NOT IN ('archived', 'pending')
 			 ORDER BY p.name`
 		)
 		.all(userId) as DBProject[];
@@ -133,6 +133,67 @@ export function listProjectsWithCounts(): Array<DBProject & { ticket_count: numb
 			 FROM projects p ORDER BY p.name`
 		)
 		.all() as Array<DBProject & { ticket_count: number }>;
+}
+
+export type PendingProject = {
+	id: number;
+	name: string;
+	slug: string;
+	created_at: number;
+	requested_by: { id: number; email: string } | null;
+	tickets: Array<{ id: number; title: string }>;
+};
+
+/** Projects a user asked for with "+ Add" that an admin has not approved yet. */
+export function listPendingProjects(): PendingProject[] {
+	const rows = db
+		.prepare(
+			`SELECT p.id, p.name, p.slug, p.created_at, u.id AS uid, u.email AS uemail
+			 FROM projects p LEFT JOIN users u ON u.id = p.created_by_user_id
+			 WHERE p.status = 'pending' ORDER BY p.created_at`
+		)
+		.all() as Array<{
+		id: number;
+		name: string;
+		slug: string;
+		created_at: number;
+		uid: number | null;
+		uemail: string | null;
+	}>;
+	const ticketsStmt = db.prepare(
+		`SELECT t.id, t.title FROM tickets t JOIN ticket_projects tp ON tp.ticket_id = t.id
+		 WHERE tp.project_id = ? ORDER BY t.id`
+	);
+	return rows.map((r) => ({
+		id: r.id,
+		name: r.name,
+		slug: r.slug,
+		created_at: r.created_at,
+		requested_by: r.uid ? { id: r.uid, email: r.uemail ?? '' } : null,
+		tickets: ticketsStmt.all(r.id) as Array<{ id: number; title: string }>
+	}));
+}
+
+/**
+ * Approves a requested project: it becomes active and its requester is assigned
+ * to it so they can file further tickets there. Returns false when the project
+ * is not awaiting approval.
+ */
+export function approveProject(id: number): { requesterId: number | null } | null {
+	const row = db
+		.prepare(`SELECT status, created_by_user_id FROM projects WHERE id = ?`)
+		.get(id) as { status: string; created_by_user_id: number | null } | undefined;
+	if (!row || row.status !== 'pending') return null;
+	db.transaction(() => {
+		db.prepare(`UPDATE projects SET status = 'active' WHERE id = ?`).run(id);
+		if (row.created_by_user_id) {
+			db.prepare('INSERT OR IGNORE INTO user_projects (user_id, project_id) VALUES (?, ?)').run(
+				row.created_by_user_id,
+				id
+			);
+		}
+	})();
+	return { requesterId: row.created_by_user_id };
 }
 
 export function createProject(name: string): DBProject {

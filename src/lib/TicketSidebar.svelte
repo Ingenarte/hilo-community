@@ -41,7 +41,7 @@
     completed_by_email: string | null;
   };
 
-  type Project = { id: number; name: string; slug: string };
+  type Project = { id: number; name: string; slug: string; status?: string };
   type AdminLite = { id: number; email: string; role?: 'user' | 'admin' };
   type Participant = {
     email: string;
@@ -377,9 +377,15 @@
           <span class="text-fainter text-xs">No projects</span>
         {/if}
         {#each projects as p}
-          <span class="chip chip-project">{p.name}</span>
+          <span class="chip chip-project" data-testid="project-chip-{p.id}">{p.name}</span>
+          {#if p.status === 'pending'}
+            <span class="chip" data-testid="project-pending-{p.id}" title="An admin still has to approve this project">Pending approval</span>
+          {/if}
         {/each}
       </div>
+      {#if isAdmin && projects.some((p) => p.status === 'pending')}
+        <a class="text-xs link mt-2 inline-block" href="/admin/projects">Review pending project</a>
+      {/if}
     {/if}
   </div>
 

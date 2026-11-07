@@ -25,6 +25,8 @@ function ensureColumn(table: string, column: string, ddl: string): void {
 }
 ensureColumn('users', 'theme', `theme TEXT NOT NULL DEFAULT 'dark'`);
 ensureColumn('users', 'accent', `accent TEXT NOT NULL DEFAULT 'violet'`);
+// Per-user override of the notification delivery mode: NULL inherits the admin default.
+ensureColumn('users', 'notify_mode', `notify_mode TEXT`);
 ensureColumn('users', 'email_schedule', `email_schedule TEXT NOT NULL DEFAULT 'immediate'`);
 ensureColumn('messages', 'edited_at', `edited_at INTEGER`);
 ensureColumn('messages', 'deleted_at', `deleted_at INTEGER`);
@@ -140,10 +142,10 @@ db.exec(
 // NULL = never seen; non-null = unix epoch of first dismissal.
 ensureColumn('users', 'seen_install_help_at', `seen_install_help_at INTEGER`);
 
-// Sprint-40jun: 'pending' was a dead-end project status with no approval UI.
-// Promote any existing pending projects to 'active' so the admin toggle
-// (active <-> archived) covers every row. Idempotent — runs once then no-ops.
-db.prepare(`UPDATE projects SET status = 'active' WHERE status = 'pending'`).run();
+// Project statuses: 'active', 'archived', and 'pending' (requested by a user with
+// "+ Add", waiting for an admin to approve, rename or merge it). Earlier versions
+// promoted every pending row to active on boot; that was removed when the
+// approval flow shipped, so pending rows now survive restarts.
 
 // Sprint-38jun: per-user per-kind email throttle table.
 // `CREATE TABLE IF NOT EXISTS` in schema.sql handles new installs.

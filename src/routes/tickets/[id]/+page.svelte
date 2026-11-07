@@ -21,6 +21,7 @@
   import { loadTicketNav, positionIn } from '$lib/ticketNav';
   import { needsRendition } from '$lib/audioFormats';
   import ExtendTimeModal from '$lib/ExtendTimeModal.svelte';
+  import TicketProjectModal from '$lib/TicketProjectModal.svelte';
   import { formatRemaining, slaTone } from '$lib/sla';
 
   // Mirrors `DBAttachment` from `src/lib/server/db.ts` — the server
@@ -75,7 +76,7 @@
     created_at: number;
     updated_at: number;
   };
-  type Project = { id: number; name: string; slug: string };
+  type Project = { id: number; name: string; slug: string; status?: string };
   type AdminLite = { id: number; email: string };
   type GroupLite = { id: number; name: string; project_name: string } | null;
   type Participant = { email: string; user_id: number | null; role: 'owner' | 'member' | 'admin' | 'cc' };
@@ -229,6 +230,7 @@
   let showReactionsFor = $state<number | null>(null);
   let editingProjects = $state(false);
   let projectDraft = $state<number[]>([]);
+  let projectModalOpen = $state(false);
   let followerDraft = $state('');
   let notifState = $state<NotifyState>('default');
   let scrollEl: HTMLElement | null = $state(null);
@@ -824,8 +826,21 @@
               </button>
             {/if}
             {#each data.projects as p}
-              <span class="chip chip-project max-w-[70vw] sm:max-w-xs truncate" title={p.name}>{p.name}</span>
+              {#if data.isAdmin}
+                <button type="button" class="chip chip-project max-w-[70vw] sm:max-w-xs truncate cursor-pointer max-sm:min-h-9"
+                        title="{p.name}: rename or reassign" data-testid="project-chip-btn-{p.id}"
+                        onclick={() => (projectModalOpen = true)}>{p.name}</button>
+              {:else}
+                <span class="chip chip-project max-w-[70vw] sm:max-w-xs truncate" title={p.name}>{p.name}</span>
+              {/if}
+              {#if p.status === 'pending'}
+                <span class="chip" title="An admin still has to approve this project" data-testid="project-pending-{p.id}">Pending approval</span>
+              {/if}
             {/each}
+            {#if data.isAdmin && data.projects.length === 0}
+              <button type="button" class="chip cursor-pointer" onclick={() => (projectModalOpen = true)}
+                      data-testid="project-chip-add">+ Project</button>
+            {/if}
             {#if live}
               <span class="chip chip-live" style="border-radius: 999px;">
                 <span class="inline-block w-1.5 h-1.5 rounded-full" style="background: currentColor;"></span>
@@ -837,7 +852,8 @@
           <h1 class="text-lg font-bold tracking-tight truncate max-sm:order-5 max-sm:basis-full max-sm:whitespace-normal max-sm:line-clamp-2 max-sm:leading-snug">{data.ticket.title}</h1>
 
           {#if data.isAdmin && owner}
-            <div class="text-fainter text-xs mt-0.5 max-sm:order-6 max-sm:basis-full max-sm:mt-0">from {owner.email}</div>
+            <div class="text-xs mt-0.5 max-sm:order-6 max-sm:basis-full max-sm:mt-0"><a class="owner-link pointer-events-auto" href="/tickets?user={owner.user_id}&status=any"
+                       title="Show all tickets from this user" data-testid="owner-link">from <span class="owner-link-email">{owner.email}</span></a></div>
           {/if}
         </div>
 
@@ -1459,6 +1475,17 @@
   <input type="hidden" name="hours" value={extendHours} />
   <input type="hidden" name="reason" value={extendReason} />
 </form>
+
+{#if data.isAdmin}
+  <TicketProjectModal
+    open={projectModalOpen}
+    ticketId={data.ticket.id}
+    projects={data.projects}
+    allProjects={data.allProjects}
+    oncancel={() => (projectModalOpen = false)}
+    ondone={invalidateAll}
+  />
+{/if}
 
 <ExtendTimeModal
   open={extendOpen}

@@ -80,7 +80,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		);
 		const validIds = db
 			.prepare(
-				`SELECT id FROM projects WHERE id IN (${projectIds.map(() => '?').join(',')}) AND status != 'archived'`
+				`SELECT id FROM projects WHERE id IN (${projectIds.map(() => '?').join(',')}) AND status NOT IN ('archived', 'pending')`
 			)
 			.all(...projectIds) as Array<{ id: number }>;
 		for (const p of validIds) insert.run(created.id, p.id);

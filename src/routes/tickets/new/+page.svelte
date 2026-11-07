@@ -313,7 +313,7 @@
                 : 'height: 26px; padding: 0 12px;'}
               aria-pressed={active}
             >
-              {name}
+              {name} (pending approval)
             </button>
             <button
               type="button"
@@ -364,11 +364,11 @@
 
       {#if data.projects.length === 0 && customProjects.length === 0}
         <p class="text-fainter text-xs mt-2">
-          No projects yet — type one with the <span class="font-semibold">+ Add</span> button or leave blank and the admin will tag it.
+          No projects yet. Request one with the <span class="font-semibold">+ Add</span> button (an admin approves it) or leave it blank and the admin will tag it.
         </p>
       {:else}
         <p class="text-fainter text-xs mt-2">
-          Don't see your project? Use <span class="font-semibold">+ Add</span> — the admin can rename it later.
+          Don't see your project? Use <span class="font-semibold">+ Add</span>. Your ticket is created right away and the project waits for admin approval.
         </p>
       {/if}
 

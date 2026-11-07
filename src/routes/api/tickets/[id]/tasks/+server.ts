@@ -24,6 +24,7 @@ import { canAccessTicket, getTicket, getTicketParticipants } from '$lib/server/t
 import { canCreateTask, createTask } from '$lib/server/tasks';
 import { broadcast, broadcastToUser } from '$lib/server/sse';
 import { sendWebPushToUser } from '$lib/server/webpush';
+import { channelsForUser } from '$lib/server/deliveryPolicy';
 import { sendTaskNotification } from '$lib/server/email';
 import { config } from '$lib/server/env';
 import { log } from '$lib/server/logger';
@@ -84,14 +85,17 @@ export const POST: RequestHandler = async ({ params, locals, request }) => {
 		});
 
 		const url = `${config.publicBaseUrl.replace(/\/$/, '')}/tickets/${ticketId}`;
-		sendWebPushToUser(assigneeUserId, {
-			title: `New task · ${ticket.title}`,
-			body: task.title,
-			url,
-			tag: `hilo-task-${task.id}`
-		});
+		const channels = channelsForUser(assigneeUserId);
+		if (channels.push) {
+			sendWebPushToUser(assigneeUserId, {
+				title: `New task · ${ticket.title}`,
+				body: task.title,
+				url,
+				tag: `hilo-task-${task.id}`
+			});
+		}
 
-		sendTaskNotification({
+		if (channels.email) sendTaskNotification({
 			to: task.assignee_email,
 			recipientUserId: assigneeUserId,
 			ticketId,

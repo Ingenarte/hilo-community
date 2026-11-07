@@ -19,14 +19,14 @@ export const GET: RequestHandler = ({ locals }) => {
 			.all(auth.token.ticketId) as typeof rows;
 	} else if (auth.user.role === 'admin') {
 		rows = db
-			.prepare("SELECT id, name, slug FROM projects WHERE status != 'archived' ORDER BY name")
+			.prepare("SELECT id, name, slug FROM projects WHERE status NOT IN ('archived', 'pending') ORDER BY name")
 			.all() as typeof rows;
 	} else {
 		rows = db
 			.prepare(
 				`SELECT p.id, p.name, p.slug FROM projects p
 				 JOIN user_projects up ON up.project_id = p.id
-				 WHERE up.user_id = ? AND p.status != 'archived' ORDER BY p.name`
+				 WHERE up.user_id = ? AND p.status NOT IN ('archived', 'pending') ORDER BY p.name`
 			)
 			.all(auth.user.id) as typeof rows;
 	}

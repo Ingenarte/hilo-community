@@ -221,6 +221,7 @@
     <a class="btn btn-ghost btn-sm" href="/admin/users">Users</a>
     <a class="btn btn-ghost btn-sm" href="/admin/audit">Audit log</a>
     <a class="btn btn-ghost btn-sm" href="/admin/outbox">Outbox</a>
+    <a class="btn btn-ghost btn-sm" href="/admin/notifications">Notifications</a>
   </nav>
 
   <div class="grid gap-5 lg:grid-cols-2">

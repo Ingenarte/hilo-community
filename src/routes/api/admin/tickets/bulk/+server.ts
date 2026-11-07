@@ -1,3 +1,4 @@
+import { notifyTicketMovement } from '$lib/server/notify';
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
@@ -70,6 +71,9 @@ export const POST: RequestHandler = async ({ request, locals, url }) => {
 				broadcast(id, 'edit', { id });
 			}
 		});
+		for (const id of ids) {
+			notifyTicketMovement({ ticketId: id, actor: locals.user, summary: raw.op === 'close' ? 'Ticket closed' : 'Ticket reopened' });
+		}
 	} else if (raw.op === 'priority') {
 		if (!raw.priority || !PRIORITIES.includes(raw.priority))
 			return json({ error: 'invalid priority' }, { status: 400 });
@@ -85,6 +89,9 @@ export const POST: RequestHandler = async ({ request, locals, url }) => {
 				affected += 1;
 			}
 		});
+		for (const id of ids) {
+			notifyTicketMovement({ ticketId: id, actor: locals.user, summary: `Priority changed to ${raw.priority}` });
+		}
 	} else if (raw.op === 'archive' || raw.op === 'unarchive') {
 		const target = raw.op === 'archive';
 		apply(() => {
@@ -98,11 +105,13 @@ export const POST: RequestHandler = async ({ request, locals, url }) => {
 		const check = checkExtendRequest(raw.hours, raw.reason);
 		if (!check.ok) return json({ error: check.error }, { status: 400 });
 		auditDetail = { hours: check.hours, reason: check.reason };
+		const extended: number[] = [];
 		apply(() => {
 			for (const id of ids) {
 				const r = extendTicketTime(id, locals.user!.id, check.hours, check.reason);
 				if (r) {
 					affected += 1;
+					extended.push(id);
 					audit('ticket.time_extended', {
 						actor: locals.user,
 						target: `ticket:${id}`,
@@ -111,6 +120,13 @@ export const POST: RequestHandler = async ({ request, locals, url }) => {
 				} else skipped += 1;
 			}
 		});
+		for (const id of extended) {
+			notifyTicketMovement({
+				ticketId: id,
+				actor: locals.user,
+				summary: `Response time extended by ${check.hours} h: ${check.reason}`
+			});
+		}
 	} else {
 		return json({ error: 'unknown op' }, { status: 400 });
 	}

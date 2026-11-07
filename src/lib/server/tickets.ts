@@ -594,6 +594,8 @@ export {
 	getTicketProjects,
 	getTicketProjectNames,
 	resolveProjectNames,
+	approveProject,
+	listPendingProjects,
 	listProjects,
 	listActiveProjects,
 	listProjectsForUser,

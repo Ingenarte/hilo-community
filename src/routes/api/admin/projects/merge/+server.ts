@@ -1,6 +1,7 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { mergeProjects } from '$lib/server/tickets';
+import { audit } from '$lib/server/audit';
 
 /**
  * POST /api/admin/projects/merge  { fromId, intoId }
@@ -21,6 +22,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (fromId === intoId) return json({ error: 'fromId and intoId must differ' }, { status: 400 });
 	try {
 		mergeProjects(fromId, intoId);
+		audit('project.merged', {
+			actor: locals.user,
+			target: `project:${fromId}`,
+			detail: { into: intoId }
+		});
 		return json({ ok: true });
 	} catch (err) {
 		return json({ error: (err as Error).message }, { status: 400 });

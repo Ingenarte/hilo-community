@@ -8,6 +8,12 @@ dependency bumps, tests, and sprint artefacts.
 
 ---
 
+## 2026-11-07
+
+- New projects typed with "+ Add" now wait for admin approval. Admins can approve, rename or reassign them from the project chip on a ticket or from the Projects page.
+- Admins can click "from <email>" on a ticket or in the inbox to see all tickets from that person.
+- Notifications now use one channel per person: push if enabled, email otherwise, for every ticket movement. Admins configure this under Notifications.
+
 ## 2026-10-28
 
 - Dropdown lists (status filter and others) are now readable in dark mode on Windows.

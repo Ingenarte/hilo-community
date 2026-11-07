@@ -22,6 +22,7 @@
     priority_reason: string | null;
     sla_due_at: number | null;
     user_email: string;
+    user_id: number;
     projects: string[];
     unread_count: number;
   };
@@ -204,7 +205,8 @@
                 </div>
                 <h2 class="text-[15px] tracking-tight truncate font-semibold">{t.title}</h2>
                 {#if data.isAdmin}
-                  <div class="text-fainter text-[11.5px] mt-0.5">from {t.user_email}</div>
+                  <div class="text-[11.5px] mt-0.5"><a class="owner-link pointer-events-auto" href="/tickets?user={t.user_id}&status=any"
+                       title="Show all tickets from this user" data-testid="owner-link">from <span class="owner-link-email">{t.user_email}</span></a></div>
                 {/if}
                 {#if t.priority === 'urgent' && t.priority_reason}
                   <div class="text-[12px] mt-1 truncate" style="color: var(--color-danger);">

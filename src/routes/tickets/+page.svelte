@@ -13,6 +13,7 @@
     status: 'open' | 'pending' | 'closed';
     priority: 'urgent' | 'high' | 'normal' | 'low';
     user_email: string;
+    user_id: number;
     projects: string[];
     message_count: number;
     unread_count: number;
@@ -504,7 +505,8 @@
                 </h2>
 
                 {#if data.isAdmin}
-                  <div class="text-fainter text-[11.5px] mt-0.5">from {t.user_email}</div>
+                  <div class="text-[11.5px] mt-0.5"><a class="owner-link pointer-events-auto" href="/tickets?user={t.user_id}&status=any"
+                       title="Show all tickets from this user" data-testid="owner-link">from <span class="owner-link-email">{t.user_email}</span></a></div>
                 {/if}
               </div>
 

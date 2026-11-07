@@ -48,7 +48,7 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
 			// Only insert valid, non-archived projects
 			const valid = db
 				.prepare(
-					`SELECT id FROM projects WHERE id IN (${projectIds.map(() => '?').join(',')}) AND status != 'archived'`
+					`SELECT id FROM projects WHERE id IN (${projectIds.map(() => '?').join(',')}) AND status NOT IN ('archived', 'pending')`
 				)
 				.all(...projectIds) as Array<{ id: number }>;
 			for (const p of valid) insert.run(userId, p.id);

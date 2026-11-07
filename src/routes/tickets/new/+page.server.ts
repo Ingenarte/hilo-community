@@ -61,9 +61,10 @@ function slugify(s: string): string {
  * Map form-submitted project names to ids, enforcing per-user access:
  *  - Existing project AND user is in `user_projects` (or admin) → reuse.
  *  - Existing project AND user is NOT in `user_projects` → 403.
- *  - Name does NOT match any project → create as `status='active'`,
- *    set `created_by_user_id`, auto-assign the user. Admin can rename
- *    or archive from /admin/projects.
+ *  - Existing project awaiting approval → only its requester may reuse it.
+ *  - Name does NOT match any project → admins create it active; for everyone
+ *    else it is created as `status='pending'` (requester in `created_by_user_id`,
+ *    NOT assigned) and an admin approves, renames or merges it from /admin/projects.
  */
 function resolveProjectsForUser(
 	names: string[],
@@ -78,7 +79,7 @@ function resolveProjectsForUser(
 	const slugStmt = db.prepare('SELECT 1 FROM projects WHERE slug = ?');
 	const insertProjectStmt = db.prepare(
 		`INSERT INTO projects (name, slug, status, created_by_user_id)
-		 VALUES (?, ?, 'active', ?)`
+		 VALUES (?, ?, ?, ?)`
 	);
 	const insertAssignmentStmt = db.prepare(
 		'INSERT OR IGNORE INTO user_projects (user_id, project_id) VALUES (?, ?)'
@@ -96,6 +97,16 @@ function resolveProjectsForUser(
 			if (found.status === 'archived') {
 				throw error(400, `Project "${name}" is archived and does not accept new tickets.`);
 			}
+			if (found.status === 'pending') {
+				const owner = db
+					.prepare('SELECT created_by_user_id AS u FROM projects WHERE id = ?')
+					.get(found.id) as { u: number | null };
+				if (user.role !== 'admin' && owner.u !== user.id) {
+					throw error(400, `Project "${name}" is awaiting admin approval.`);
+				}
+				ids.push(found.id);
+				continue;
+			}
 			if (user.role !== 'admin' && !assignStmt.get(user.id, found.id)) {
 				throw error(403, `You are not assigned to project "${name}".`);
 			}
@@ -103,16 +114,17 @@ function resolveProjectsForUser(
 			continue;
 		}
 
-		// New project — create as active, auto-assign the creator.
+		// New project: active at once for admins, otherwise pending admin approval.
 		let slug = slugify(name);
 		let suffix = 0;
 		while (slugStmt.get(slug)) {
 			suffix += 1;
 			slug = `${slugify(name)}-${suffix}`;
 		}
-		const info = insertProjectStmt.run(name, slug, user.id);
+		const isAdmin = user.role === 'admin';
+		const info = insertProjectStmt.run(name, slug, isAdmin ? 'active' : 'pending', user.id);
 		const newId = Number(info.lastInsertRowid);
-		insertAssignmentStmt.run(user.id, newId);
+		if (isAdmin) insertAssignmentStmt.run(user.id, newId);
 		ids.push(newId);
 	}
 	return ids;

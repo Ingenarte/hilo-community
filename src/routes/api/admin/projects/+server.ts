@@ -4,7 +4,8 @@ import {
 	createProject,
 	deleteProject,
 	listProjectsWithCounts,
-	renameProject
+	renameProject,
+	approveProject
 } from '$lib/server/tickets';
 import { db } from '$lib/server/db';
 import { audit } from '$lib/server/audit';
@@ -46,6 +47,15 @@ export const PATCH: RequestHandler = async ({ request, locals }) => {
 			const validStatuses = ['active', 'archived'];
 			if (!validStatuses.includes(data.status)) {
 				throw error(400, 'invalid status');
+			}
+			const approved = data.status === 'active' ? approveProject(id) : null;
+			if (approved) {
+				audit('project.approved', {
+					actor: locals.user,
+					target: `project:${id}`,
+					detail: { requester: approved.requesterId }
+				});
+				return json({ ok: true, approved: true });
 			}
 			db.prepare('UPDATE projects SET status = ? WHERE id = ?').run(data.status, id);
 			audit('project.status.changed', {

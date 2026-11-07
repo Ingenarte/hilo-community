@@ -12,7 +12,21 @@
     ticket_count: number;
   };
 
-  type Props = { data: { projects: Project[] } };
+  type PendingProject = {
+    id: number;
+    name: string;
+    slug: string;
+    created_at: number;
+    requested_by: { id: number; email: string } | null;
+    tickets: Array<{ id: number; title: string }>;
+  };
+  type Props = {
+    data: {
+      projects: Project[];
+      pending: PendingProject[];
+      targets: Array<{ id: number; name: string }>;
+    };
+  };
   const { data }: Props = $props();
 
   let q = $state('');
@@ -99,6 +113,56 @@
     await invalidateAll();
   }
 
+  // ── Pending requests (users who used "+ Add" on a new ticket) ─────────────
+  let pendingBusy = $state<number | null>(null);
+  let pendingError = $state<string | null>(null);
+  let pendingName = $state<Record<number, string>>({});
+  let moveTarget = $state<Record<number, string>>({});
+
+  async function pendingCall(id: number, url: string, method: string, body: unknown) {
+    pendingBusy = id;
+    pendingError = null;
+    const r = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    pendingBusy = null;
+    if (!r.ok) {
+      const b = await r.json().catch(() => ({}));
+      pendingError = b.error || b.message || 'Request failed';
+      return;
+    }
+    await invalidateAll();
+  }
+
+  const approve = (p: PendingProject) =>
+    pendingCall(p.id, '/api/admin/projects', 'PATCH', { id: p.id, status: 'active' });
+
+  // Rename first when the admin edited the name, then approve.
+  async function renameAndApprove(p: PendingProject) {
+    const name = (pendingName[p.id] ?? p.name).trim();
+    if (name && name !== p.name) {
+      const r = await fetch('/api/admin/projects', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.id, name })
+      });
+      if (!r.ok) {
+        const b = await r.json().catch(() => ({}));
+        pendingError = b.error || 'Failed to rename';
+        return;
+      }
+    }
+    await approve(p);
+  }
+
+  const moveTickets = (p: PendingProject) =>
+    pendingCall(p.id, '/api/admin/projects/merge', 'POST', {
+      fromId: p.id,
+      intoId: Number(moveTarget[p.id])
+    });
+
   // ── Archive / unarchive ───────────────────────────────────────────────────
   let archiving = $state<number | null>(null);
 
@@ -148,6 +212,67 @@
     <div class="eyebrow mb-2">Admin</div>
     <h1 class="text-3xl font-bold tracking-tight">Projects</h1>
   </header>
+
+  {#if data.pending.length > 0}
+    <div class="glass p-4 mb-4" data-testid="pending-projects">
+      <h2 class="text-sm font-semibold mb-1">Pending approval ({data.pending.length})</h2>
+      <p class="text-xs text-fainter mb-3">
+        Requested by users with "+ Add" on a new ticket. Approve the name, rename it, or move the
+        tickets to an existing project.
+      </p>
+      {#if pendingError}
+        <p class="text-xs mb-2" style="color: var(--color-danger);">{pendingError}</p>
+      {/if}
+      <ul class="space-y-3">
+        {#each data.pending as p (p.id)}
+          <li class="rounded-xl p-3 border" style="border-color: var(--glass-border);" data-testid="pending-project-{p.id}">
+            <div class="flex flex-wrap items-center gap-2 mb-2">
+              <input
+                class="input h-9 text-sm flex-1 min-w-[160px]"
+                aria-label="Project name"
+                maxlength="80"
+                value={pendingName[p.id] ?? p.name}
+                oninput={(e) => (pendingName[p.id] = e.currentTarget.value)}
+                data-testid="pending-name-{p.id}"
+              />
+              <button
+                class="btn btn-primary h-9 text-xs"
+                disabled={pendingBusy === p.id}
+                onclick={() => renameAndApprove(p)}
+                data-testid="pending-approve-{p.id}"
+              >
+                {(pendingName[p.id] ?? p.name).trim() !== p.name ? 'Rename and approve' : 'Approve'}
+              </button>
+            </div>
+            <p class="text-xs text-muted mb-2">
+              Requested by {p.requested_by ? p.requested_by.email : 'unknown'}
+              on {fmtDate(p.created_at)}. Tickets:
+              {#each p.tickets as t, i}<a class="link" href="/tickets/{t.id}">#{t.id}</a>{i < p.tickets.length - 1 ? ', ' : ''}{/each}
+            </p>
+            <div class="flex flex-wrap items-center gap-2">
+              <select
+                class="select h-9 text-xs flex-1 min-w-[160px]"
+                aria-label="Move tickets to an existing project"
+                bind:value={moveTarget[p.id]}
+                data-testid="pending-target-{p.id}"
+              >
+                <option value="">Move tickets to an existing project...</option>
+                {#each data.targets as t}<option value={String(t.id)}>{t.name}</option>{/each}
+              </select>
+              <button
+                class="btn btn-ghost h-9 text-xs"
+                disabled={!moveTarget[p.id] || pendingBusy === p.id}
+                onclick={() => moveTickets(p)}
+                data-testid="pending-move-{p.id}"
+              >
+                Move tickets
+              </button>
+            </div>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
 
   <div class="glass p-3 flex flex-wrap items-center gap-3 mb-4">
     <label class="relative flex-1 min-w-[200px]">

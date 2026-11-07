@@ -1,3 +1,4 @@
+import { notifyTicketMovement } from '$lib/server/notify';
 import { isHttpError } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { config } from '$lib/server/env';
@@ -111,6 +112,7 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 
 	setTicketStatus(loaded.id, status);
 	broadcast(loaded.id, 'edit', { id: loaded.id });
+	notifyTicketMovement({ ticketId: loaded.id, actor: auth.user, summary: `Status changed to ${status}` });
 	audit('ticket.status_changed', {
 		actor: auth.user,
 		target: `ticket:${loaded.id}`,

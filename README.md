@@ -91,6 +91,17 @@ behind Caddy / nginx (templates in [`deploy/`](deploy/)).
   lock (WebAuthn, needs HTTPS). Admins can send one-time password links, force
   a password change on first sign-in, and new passwords are screened against
   known breaches.
+- **One channel per person.** People who enabled web push get push only; everyone
+  else gets email. Every ticket movement (new message, status, priority,
+  assignment, deadline, project, task) notifies the same audience: owner,
+  followers with an account and active admins, never the person who made the
+  change. Admins set the default (Automatic, Email only, Push first), override it
+  per person and optionally cap message emails to one per day in
+  `/admin/notifications`.
+- **Project requests.** A project a user adds with "+ Add" on a new ticket stays
+  pending until an admin approves it, renames it or moves its tickets to an
+  existing project (`/admin/projects`, or the project chip on the ticket). Admins
+  can click "from user" on any ticket to see all tickets of that person.
 - **Deadline reminders.** Each priority has a response target (urgent 24 h,
   high 48 h, normal 72 h, low 96 h) that restarts with every public message.
   Everyone gets a due-soon alert, a weekday digest and a weekly overdue

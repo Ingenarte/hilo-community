@@ -1,3 +1,4 @@
+import { notifyTicketMovement } from '$lib/server/notify';
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import {
@@ -114,6 +115,7 @@ export const actions: Actions = {
 		if (!canAccessTicket(locals.user, t)) throw error(403, 'Forbidden');
 		setTicketStatus(id, 'closed');
 		broadcast(id, 'edit', { id });
+		notifyTicketMovement({ ticketId: id, actor: locals.user, summary: 'Ticket closed' });
 		return { ok: true };
 	},
 	reopen: async ({ locals, params }) => {
@@ -127,6 +129,7 @@ export const actions: Actions = {
 		if (locals.user.role !== 'admin') throw error(403, 'Only an administrator can reopen a closed ticket.');
 		setTicketStatus(id, 'open');
 		broadcast(id, 'edit', { id });
+		notifyTicketMovement({ ticketId: id, actor: locals.user, summary: 'Ticket reopened' });
 		return { ok: true };
 	},
 	priority: async ({ locals, params, request }) => {
@@ -152,6 +155,7 @@ export const actions: Actions = {
 		}
 
 		setTicketPriority(id, next, reason);
+		notifyTicketMovement({ ticketId: id, actor: locals.user, summary: `Priority changed to ${next}` });
 		audit('ticket.priority_changed', {
 			actor: locals.user,
 			target: `ticket:${id}`,
@@ -197,6 +201,11 @@ export const actions: Actions = {
 			detail: { hours: check.hours, reason: check.reason, previous_due: result.previousDue, new_due: result.newDue }
 		});
 		broadcast(id, 'edit', { id });
+		notifyTicketMovement({
+			ticketId: id,
+			actor: locals.user,
+			summary: `Response time extended by ${check.hours} h: ${check.reason}`
+		});
 		return { ok: true };
 	}
 };

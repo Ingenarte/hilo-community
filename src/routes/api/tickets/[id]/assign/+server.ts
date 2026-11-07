@@ -4,6 +4,7 @@ import { db } from '$lib/server/db';
 import { getTicket, setTicketAssignment } from '$lib/server/tickets';
 import { dispatchWebhooks } from '$lib/server/webhooks';
 import { config } from '$lib/server/env';
+import { notifyTicketMovement } from '$lib/server/notify';
 
 /**
  * POST /api/tickets/:id/assign  { adminUserId: number | null }
@@ -28,6 +29,12 @@ export const POST: RequestHandler = async ({ params, locals, request }) => {
 	}
 
 	setTicketAssignment(id, target);
+	const assignee = target === null ? null : (db.prepare('SELECT email FROM users WHERE id = ?').get(target) as { email: string } | undefined);
+	notifyTicketMovement({
+		ticketId: id,
+		actor: locals.user,
+		summary: assignee ? `Assigned to ${assignee.email}` : 'Unassigned'
+	});
 
 	dispatchWebhooks('ticket.assigned', {
 		ticket_id: id,
