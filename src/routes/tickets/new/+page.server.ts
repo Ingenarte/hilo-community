@@ -50,7 +50,7 @@ export const load: PageServerLoad = ({ locals }) => {
 			project_name: p.name
 		}))
 	);
-	return { projects, users, groups };
+	return { projects, users, groups, isAdmin: locals.user.role === 'admin' };
 };
 
 function slugify(s: string): string {
@@ -241,7 +241,9 @@ export const actions: Actions = {
 			projectIds,
 			groupId,
 			priority: priorityRaw,
-			priorityReason
+			priorityReason,
+			// Tickets opened by users wait for an admin; admins create approved tickets.
+			approval: locals.user.role === 'admin' ? 'approved' : 'pending'
 		});
 		audit('ticket.created', {
 			actor: locals.user,
@@ -252,7 +254,8 @@ export const actions: Actions = {
 			ticketId,
 			senderId: locals.user.id,
 			senderRole: locals.user.role,
-			body
+			body,
+			allowUnapproved: true
 		});
 
 		const savedAttachments: Array<{
@@ -290,7 +293,8 @@ export const actions: Actions = {
 		}).catch((err) => console.error('[notify] fan-out failed', err));
 
 		const ticketUrl = `${config.publicBaseUrl.replace(/\/$/, '')}/tickets/${ticketId}`;
-		dispatchWebhooks('ticket.new', {
+		// Webhooks fire when an admin approves a ticket a user opened.
+		if (locals.user.role === 'admin') dispatchWebhooks('ticket.new', {
 			ticket_id: ticketId,
 			title,
 			priority: priorityRaw,

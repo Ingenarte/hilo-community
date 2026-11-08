@@ -51,6 +51,8 @@ export type TicketsQuery = {
 	includeArchived?: boolean;
 	/** Filter by ticket author (tickets.user_id). Independent of the visibility scope. */
 	ownerId?: number;
+	/** Admin filter: only tickets waiting for approval. */
+	approval?: 'pending';
 	groupId?: number;
 	/** overdue: past its deadline; '24h': due within 24 hours; none: no deadline. */
 	due?: 'overdue' | '24h' | 'none';
@@ -130,8 +132,11 @@ export function queryTickets(q: TicketsQuery = {}): TicketsPage {
 			params.userEmail = q.userEmail;
 		}
 		where.push(`(${sharedClauses.join(' OR ')})`);
+		// Tickets awaiting or refused approval are visible to their owner only.
+		where.push(`(t.approval_status = 'approved' OR t.user_id = $userId)`);
 		params.userId = q.userId;
 	}
+	if (q.approval === 'pending') where.push(`t.approval_status = 'pending'`);
 	if (q.status === 'active') {
 		where.push("t.status != 'closed'");
 	} else if (q.status && q.status !== 'any') {
@@ -314,12 +319,15 @@ export function createTicket(args: {
 	priority?: TicketPriority;
 	/** Required by callers when priority is 'urgent' (see checkUrgentRequest). */
 	priorityReason?: string | null;
+	/** 'pending' for tickets opened by users: no response clock until an admin approves. */
+	approval?: 'approved' | 'pending';
 }): number {
 	const priority = args.priority ?? 'normal';
+	const pending = args.approval === 'pending';
 	const info = db
 		.prepare(
-			`INSERT INTO tickets (user_id, title, group_id, priority, priority_reason, sla_due_at)
-			 VALUES (?, ?, ?, ?, ?, unixepoch() + ?)`
+			`INSERT INTO tickets (user_id, title, group_id, priority, priority_reason, sla_due_at, approval_status)
+			 VALUES (?, ?, ?, ?, ?, ${pending ? 'NULL' : 'unixepoch() + ?'}, ?)`
 		)
 		.run(
 			args.userId,
@@ -327,7 +335,8 @@ export function createTicket(args: {
 			args.groupId ?? null,
 			priority,
 			priority === 'urgent' ? (args.priorityReason ?? null) : null,
-			slaSeconds(priority)
+			...(pending ? [] : [slaSeconds(priority)]),
+			pending ? 'pending' : 'approved'
 		);
 	const ticketId = Number(info.lastInsertRowid);
 	const linkStmt = db.prepare(
@@ -462,6 +471,11 @@ export function canAccessTicket(
 ): boolean {
 	if (user.role === 'admin') return true;
 	if (ticket.user_id === user.id) return true;
+	// A ticket still awaiting (or refused) admin approval is private to its owner.
+	const approval = db.prepare('SELECT approval_status FROM tickets WHERE id = ?').get(ticket.id) as
+		| { approval_status: string }
+		| undefined;
+	if (approval && approval.approval_status !== 'approved') return false;
 	if (ticket.assigned_to === user.id) return true;
 	const followerRow = db
 		.prepare('SELECT 1 FROM ticket_followers WHERE ticket_id = ? AND email = ? COLLATE NOCASE')
@@ -586,7 +600,10 @@ export {
 	editMessage,
 	softDeleteMessage,
 	toggleReaction,
-	getMessageTicketId
+	getMessageTicketId,
+	approveTicket,
+	rejectTicket,
+	countPendingApproval
 } from './tickets-messages';
 export type { MessageRow, MessageView, RepliedToPreview } from './tickets-messages';
 

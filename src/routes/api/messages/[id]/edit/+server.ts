@@ -17,8 +17,8 @@ function authorise(messageId: number, locals: App.Locals) {
 	if (!t) throw error(404, 'Ticket not found');
 	if (!canAccessTicket(locals.user, t)) throw error(403, 'Forbidden');
 	// Closed tickets are frozen for users: only an administrator may still change messages.
-	if (t.status === 'closed' && locals.user.role !== 'admin') {
-		throw error(409, 'This ticket is closed, so its messages can no longer be changed.');
+	if ((t.status === 'closed' || t.approval_status === 'pending') && locals.user.role !== 'admin') {
+		throw error(409, 'This ticket is closed or waiting for approval, so its messages can no longer be changed.');
 	}
 	return { ticketId };
 }

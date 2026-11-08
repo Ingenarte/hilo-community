@@ -25,6 +25,12 @@ function ensureColumn(table: string, column: string, ddl: string): void {
 }
 ensureColumn('users', 'theme', `theme TEXT NOT NULL DEFAULT 'dark'`);
 ensureColumn('users', 'accent', `accent TEXT NOT NULL DEFAULT 'violet'`);
+// Admin approval of tickets opened by users: 'approved' (default, also for every
+// existing ticket), 'pending' (waiting for an admin) or 'rejected' (declined, closed).
+ensureColumn('tickets', 'approval_status', `approval_status TEXT NOT NULL DEFAULT 'approved'`);
+ensureColumn('tickets', 'approval_reason', `approval_reason TEXT`);
+ensureColumn('tickets', 'approval_decided_by', `approval_decided_by INTEGER`);
+ensureColumn('tickets', 'approval_decided_at', `approval_decided_at INTEGER`);
 // Per-user override of the notification delivery mode: NULL inherits the admin default.
 ensureColumn('users', 'notify_mode', `notify_mode TEXT`);
 ensureColumn('users', 'email_schedule', `email_schedule TEXT NOT NULL DEFAULT 'immediate'`);
@@ -361,6 +367,8 @@ export type DBTicket = {
 	assigned_to: number | null;
 	group_id: number | null;
 	archived_at: number | null;
+	approval_status: 'approved' | 'pending' | 'rejected';
+	approval_reason: string | null;
 	created_at: number;
 	updated_at: number;
 };

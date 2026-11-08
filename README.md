@@ -98,6 +98,13 @@ behind Caddy / nginx (templates in [`deploy/`](deploy/)).
   change. Admins set the default (Automatic, Email only, Push first), override it
   per person and optionally cap message emails to one per day in
   `/admin/notifications`.
+- **Ticket approval.** A ticket opened by a user waits for an admin: it is private
+  to its owner and admins, its response clock does not run, nothing is announced
+  to the team and the user cannot add messages. An admin approves it (the clock
+  starts and the usual notifications and webhooks fire) or rejects it with a
+  reason (the ticket is closed and the owner is told why). Pending tickets show
+  an "Awaiting approval" chip and a review banner in the admin inbox. Admins
+  create approved tickets directly.
 - **Project requests.** A project a user adds with "+ Add" on a new ticket stays
   pending until an admin approves it, renames it or moves its tickets to an
   existing project (`/admin/projects`, or the project chip on the ticket). Admins

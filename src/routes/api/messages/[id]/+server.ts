@@ -11,7 +11,7 @@ import { config } from '$lib/server/env';
 import { broadcast } from '$lib/server/sse';
 import { dispatchWebhooks } from '$lib/server/webhooks';
 import { fanOutMessageNotification } from '$lib/server/notify';
-import { TICKET_CLOSED_MESSAGE } from '$lib/server/tickets-messages';
+import { TICKET_CLOSED_MESSAGE, TICKET_NOT_APPROVED_MESSAGE } from '$lib/server/tickets-messages';
 import { db } from '$lib/server/db';
 
 export const POST: RequestHandler = async ({ params, locals, request }) => {
@@ -25,6 +25,9 @@ export const POST: RequestHandler = async ({ params, locals, request }) => {
 	// Closed tickets take no new messages from users; check before saving any upload.
 	if (t.status === 'closed' && locals.user.role !== 'admin') {
 		return json({ error: TICKET_CLOSED_MESSAGE, code: 'ticket_closed' }, { status: 409 });
+	}
+	if (t.approval_status === 'pending' && locals.user.role !== 'admin') {
+		return json({ error: TICKET_NOT_APPROVED_MESSAGE, code: 'ticket_not_approved' }, { status: 409 });
 	}
 
 	// Defensive content-type check: the endpoint only accepts multipart and

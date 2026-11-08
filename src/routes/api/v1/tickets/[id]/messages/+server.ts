@@ -2,7 +2,7 @@ import type { RequestHandler } from './$types';
 import { config } from '$lib/server/env';
 import { audit } from '$lib/server/audit';
 import { appendMessage } from '$lib/server/tickets';
-import { TICKET_CLOSED_MESSAGE } from '$lib/server/tickets-messages';
+import { TICKET_CLOSED_MESSAGE, TICKET_NOT_APPROVED_MESSAGE } from '$lib/server/tickets-messages';
 import { broadcast } from '$lib/server/sse';
 import { dispatchWebhooks } from '$lib/server/webhooks';
 import { fanOutMessageNotification } from '$lib/server/notify';
@@ -48,6 +48,9 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 	const { ticket: t, id } = loaded;
 	if (t.status === 'closed' && auth.user.role !== 'admin') {
 		return v1Error(409, TICKET_CLOSED_MESSAGE);
+	}
+	if (t.approval_status === 'pending' && auth.user.role !== 'admin') {
+		return v1Error(409, TICKET_NOT_APPROVED_MESSAGE);
 	}
 
 	const messageId = appendMessage({

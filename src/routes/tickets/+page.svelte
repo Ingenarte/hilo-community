@@ -14,6 +14,7 @@
     priority: 'urgent' | 'high' | 'normal' | 'low';
     user_email: string;
     user_id: number;
+    approval_status?: 'approved' | 'pending' | 'rejected';
     projects: string[];
     message_count: number;
     unread_count: number;
@@ -41,6 +42,8 @@
       users: Array<{ id: number; email: string }>;
       filters: { search: string; status: string; statusDefault: boolean; priority: string; projectId: number | null; userId: number | null; archived: boolean };
       isAdmin: boolean;
+      pendingApproval: number;
+      approvalFilter: boolean;
     };
   };
 
@@ -289,6 +292,20 @@
     </svg>
   </button>
 
+  {#if data.isAdmin && (data.pendingApproval > 0 || data.approvalFilter)}
+    <div class="glass p-3 mb-3 flex flex-wrap items-center gap-3" data-testid="approval-queue-banner">
+      <span class="chip">Awaiting approval</span>
+      <span class="text-sm text-muted flex-1 min-w-[180px]">
+        {data.pendingApproval} {data.pendingApproval === 1 ? 'ticket needs' : 'tickets need'} an admin decision.
+      </span>
+      {#if data.approvalFilter}
+        <a class="btn btn-ghost max-sm:min-h-10" href="/tickets" data-testid="approval-clear">Show all</a>
+      {:else}
+        <a class="btn btn-primary max-sm:min-h-10" href="/tickets?approval=pending&status=any" data-testid="approval-review">Review</a>
+      {/if}
+    </div>
+  {/if}
+
   <!-- Filter controls: always visible on sm+, conditionally on mobile -->
   <div class="{filtersOpen ? 'block' : 'hidden'} sm:block">
     <div class="glass p-3 flex flex-wrap items-center gap-2.5"
@@ -451,6 +468,11 @@
                   </span>
                   {#if t.priority !== 'normal'}
                     <span class="chip chip-{t.priority}">{t.priority}</span>
+                  {/if}
+                  {#if t.approval_status === 'pending'}
+                    <span class="chip" data-testid="awaiting-approval-chip">Awaiting approval</span>
+                  {:else if t.approval_status === 'rejected'}
+                    <span class="chip chip-closed" data-testid="rejected-chip">Not approved</span>
                   {/if}
                   {#each t.projects as p}
                     <span class="chip chip-project">{p}</span>

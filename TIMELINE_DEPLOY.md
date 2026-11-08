@@ -8,6 +8,11 @@ dependency bumps, tests, and sprint artefacts.
 
 ---
 
+## 2026-11-08
+
+- New tickets from users now wait for an admin to approve or reject them. Until then the ticket is private, the response clock does not run and the user cannot add messages; the user is told the outcome.
+- Requesting a new project through the API now also waits for admin approval.
+
 ## 2026-11-07
 
 - New projects typed with "+ Add" now wait for admin approval. Admins can approve, rename or reassign them from the project chip on a ticket or from the Projects page.

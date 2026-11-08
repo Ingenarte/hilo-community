@@ -128,10 +128,12 @@ export function getMessagesForTicket(
  * Called on every public message and when a ticket is reopened.
  */
 export function restartResponseTarget(ticketId: number): void {
-	const row = db.prepare('SELECT priority FROM tickets WHERE id = ?').get(ticketId) as
-		| { priority: Priority }
-		| undefined;
+	const row = db
+		.prepare('SELECT priority, approval_status FROM tickets WHERE id = ?')
+		.get(ticketId) as { priority: Priority; approval_status: string } | undefined;
 	if (!row) return;
+	// A ticket awaiting approval has no running clock; approveTicket starts it.
+	if (row.approval_status === 'pending') return;
 	db.prepare('UPDATE tickets SET sla_due_at = unixepoch() + ? WHERE id = ?').run(
 		slaSeconds(isPriority(row.priority) ? row.priority : DEFAULT_PRIORITY),
 		ticketId
@@ -146,6 +148,17 @@ export class TicketClosedError extends Error {
 	}
 }
 
+/** A user tried to write in a ticket that an admin has not approved yet. */
+export class TicketNotApprovedError extends Error {
+	constructor(public ticketId: number) {
+		super(`Ticket #${ticketId} is waiting for admin approval.`);
+		this.name = 'TicketNotApprovedError';
+	}
+}
+
+export const TICKET_NOT_APPROVED_MESSAGE =
+	'This ticket is waiting for an administrator to approve it, so replies are off until then.';
+
 export const TICKET_CLOSED_MESSAGE =
 	'This ticket is closed. Only an administrator can reopen it. If you need something else, open a new ticket.';
 
@@ -158,15 +171,20 @@ export function appendMessage(args: {
 	repliedToMessageId?: number | null;
 	/** Set when an agent posts through an API token (shown as an agent message). */
 	viaTokenId?: number | null;
+	/** The first message of a new ticket is written while it still awaits approval. */
+	allowUnapproved?: boolean;
 }): number {
 	const internal = args.internal ? 1 : 0;
 
 	// Closed tickets take no new messages from users (admins may still write).
 	if (args.senderRole === 'user') {
-		const st = db.prepare('SELECT status FROM tickets WHERE id = ?').get(args.ticketId) as
-			| { status: string }
+		const st = db.prepare('SELECT status, approval_status FROM tickets WHERE id = ?').get(args.ticketId) as
+			| { status: string; approval_status: string }
 			| undefined;
 		if (st?.status === 'closed') throw new TicketClosedError(args.ticketId);
+		if (st && st.approval_status === 'pending' && !args.allowUnapproved) {
+			throw new TicketNotApprovedError(args.ticketId);
+		}
 	}
 
 	// Defensive: if a reply target is provided, verify it belongs to the same
@@ -232,12 +250,12 @@ export function getAttachment(id: number): DBAttachment | null {
 	);
 }
 
-/** Closed tickets are frozen for users: no new, edited or deleted messages. */
+/** Closed or not-yet-approved tickets are frozen for users: no new, edited or deleted messages. */
 export function isTicketClosed(ticketId: number): boolean {
-	const r = db.prepare('SELECT status FROM tickets WHERE id = ?').get(ticketId) as
-		| { status: string }
+	const r = db.prepare('SELECT status, approval_status FROM tickets WHERE id = ?').get(ticketId) as
+		| { status: string; approval_status: string }
 		| undefined;
-	return r?.status === 'closed';
+	return r?.status === 'closed' || r?.approval_status === 'pending';
 }
 
 export function editMessage(args: {
@@ -309,4 +327,37 @@ export function getMessageTicketId(messageId: number): number | null {
 		| { ticket_id: number }
 		| undefined;
 	return row?.ticket_id ?? null;
+}
+
+/**
+ * Admin approves a ticket a user opened: it becomes a normal ticket and its
+ * response clock starts now. Returns false when it was not awaiting approval.
+ */
+export function approveTicket(ticketId: number, adminId: number): boolean {
+	const r = db
+		.prepare(
+			`UPDATE tickets SET approval_status = 'approved', approval_decided_by = ?,
+			        approval_decided_at = unixepoch(), approval_reason = NULL, updated_at = unixepoch()
+			 WHERE id = ? AND approval_status = 'pending'`
+		)
+		.run(adminId, ticketId);
+	if (r.changes === 0) return false;
+	restartResponseTarget(ticketId);
+	return true;
+}
+
+/** Admin declines a pending ticket with a reason; it is closed and stays read-only for the user. */
+export function rejectTicket(ticketId: number, adminId: number, reason: string): boolean {
+	const r = db
+		.prepare(
+			`UPDATE tickets SET approval_status = 'rejected', approval_reason = ?, status = 'closed',
+			        approval_decided_by = ?, approval_decided_at = unixepoch(), updated_at = unixepoch()
+			 WHERE id = ? AND approval_status = 'pending'`
+		)
+		.run(reason.slice(0, 500), adminId, ticketId);
+	return r.changes > 0;
+}
+
+export function countPendingApproval(): number {
+	return (db.prepare(`SELECT COUNT(*) AS n FROM tickets WHERE approval_status = 'pending'`).get() as { n: number }).n;
 }

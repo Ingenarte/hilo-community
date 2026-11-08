@@ -73,6 +73,8 @@
     assigned_to: number | null;
     group_id: number | null;
     archived_at: number | null;
+    approval_status: 'approved' | 'pending' | 'rejected';
+    approval_reason: string | null;
     created_at: number;
     updated_at: number;
   };
@@ -231,6 +233,14 @@
   let editingProjects = $state(false);
   let projectDraft = $state<number[]>([]);
   let projectModalOpen = $state(false);
+  let rejectOpen = $state(false);
+  let rejectReason = $state('');
+  let approvalBusy = $state(false);
+  let approvalError = $state<string | null>(null);
+  // Users cannot write while the ticket is closed or still awaiting an admin.
+  const frozenForUser = $derived(
+    !data.isAdmin && (data.ticket.status === 'closed' || data.ticket.approval_status === 'pending')
+  );
   let followerDraft = $state('');
   let notifState = $state<NotifyState>('default');
   let scrollEl: HTMLElement | null = $state(null);
@@ -406,6 +416,10 @@
         }
         if (res.status === 413) {
           throw new Error('That file is larger than the server allows. Try a smaller one.');
+        }
+        if (res.status === 409 && text.includes('ticket_not_approved')) {
+          await invalidateAll();
+          throw new Error('This ticket is waiting for admin approval, so your message was not sent.');
         }
         if (res.status === 409 && text.includes('ticket_closed')) {
           // The ticket was closed while this page was open: show the closed state.
@@ -1210,7 +1224,7 @@
                 <!-- message actions: hover on desktop (absolute overlay), always visible on touch (inline below bubble) -->
                 <div class="msg-actions flex gap-1 {isMine(m) ? 'justify-end' : 'justify-start'}">
                   <!-- Reply button — available on all non-deleted messages (not to users on a closed ticket) -->
-                  {#if !m.deleted_at && !(data.ticket.status === 'closed' && !data.isAdmin)}
+                  {#if !m.deleted_at && !frozenForUser}
                     <button type="button" class="btn btn-ghost glass-strong btn-icon"
                             aria-label="Reply to message" onclick={() => startReply(m)}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1229,7 +1243,7 @@
                       <line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" />
                     </svg>
                   </button>
-                  {#if isMine(m) && !(data.ticket.status === 'closed' && !data.isAdmin)}
+                  {#if isMine(m) && !frozenForUser}
                     <button type="button" class="btn btn-ghost glass-strong btn-icon"
                             aria-label="Edit" onclick={() => startEdit(m)}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1310,10 +1324,34 @@
         {/if}
       </ul>
 
+      {#if data.isAdmin && data.ticket.approval_status === 'pending'}
+        <div class="border-t p-3 flex flex-wrap items-center gap-3" style="border-color: var(--glass-border);"
+             role="status" data-testid="approval-banner">
+          <span class="chip" style="flex-shrink:0;">Awaiting approval</span>
+          <p class="text-sm text-muted flex-1 min-w-[200px]">
+            Opened by {owner?.email ?? 'a user'}. Approve to start the response clock and notify the team,
+            or reject with a reason.
+          </p>
+          <form method="POST" action="?/approve" use:enhance={() => { approvalBusy = true; return async ({ update }) => { await update(); approvalBusy = false; await invalidateAll(); }; }}>
+            <button class="btn btn-primary max-sm:min-h-10" type="submit" disabled={approvalBusy} data-testid="approve-ticket">Approve</button>
+          </form>
+          <button class="btn max-sm:min-h-10" type="button" onclick={() => { rejectReason = ''; approvalError = null; rejectOpen = true; }} data-testid="reject-ticket">Reject</button>
+        </div>
+      {/if}
+
       <!-- C) Composer · padding-bottom respects iPhone home indicator inset -->
       <div bind:this={composerRef}
            style="padding-bottom: env(safe-area-inset-bottom, 0px);">
-        {#if data.ticket.status === 'closed' && !data.isAdmin}
+        {#if data.ticket.approval_status === 'pending' && !data.isAdmin}
+          <div class="border-t p-4 flex flex-wrap items-center gap-3" style="border-color: var(--glass-border);"
+               role="status" data-testid="pending-approval-notice">
+            <span class="chip" style="flex-shrink:0;">Awaiting approval</span>
+            <p class="text-sm text-muted flex-1 min-w-[200px]">
+              An administrator has to approve this ticket before it starts. You will be notified,
+              and replies are off until then.
+            </p>
+          </div>
+        {:else if data.ticket.status === 'closed' && !data.isAdmin}
           <!-- Closed tickets take no replies from users; an administrator reviews and reopens. -->
           <div class="border-t p-4 flex flex-wrap items-center gap-3" style="border-color: var(--glass-border);"
                role="status" data-testid="closed-notice">
@@ -1323,8 +1361,13 @@
               <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
             <p class="text-sm text-muted flex-1 min-w-[200px]">
-              This ticket is closed, so replies are off. Only an administrator can reopen it.
-              If you need something else, open a new ticket.
+              {#if data.ticket.approval_status === 'rejected'}
+                This ticket was not approved{data.ticket.approval_reason ? `: ${data.ticket.approval_reason}` : ''}.
+                Replies are off. If you need something else, open a new ticket.
+              {:else}
+                This ticket is closed, so replies are off. Only an administrator can reopen it.
+                If you need something else, open a new ticket.
+              {/if}
             </p>
             <a href="/tickets/new" class="btn btn-primary" data-testid="closed-new-ticket">
               Open a new ticket
@@ -1485,6 +1528,33 @@
     oncancel={() => (projectModalOpen = false)}
     ondone={invalidateAll}
   />
+{/if}
+
+{#if rejectOpen}
+  <div class="fixed inset-0 z-[260] flex items-start justify-center px-4 pb-4 overflow-y-auto" style="padding-top: min(10vh, 4rem);"
+       role="dialog" aria-modal="true" aria-labelledby="reject-title" tabindex="-1"
+       onkeydown={(e) => { if (e.key === 'Escape') rejectOpen = false; }}>
+    <button type="button" class="absolute inset-0 cursor-default border-0 bg-black/60 p-0" aria-label="Cancel" tabindex="-1" onclick={() => (rejectOpen = false)}></button>
+    <form method="POST" action="?/reject" class="glass relative z-10 w-full max-w-md p-6 rounded-xl" data-testid="reject-modal"
+          use:enhance={() => { approvalBusy = true; approvalError = null; return async ({ result, update }) => {
+            approvalBusy = false;
+            if (result.type === 'failure') { approvalError = (result.data as { approvalError?: string })?.approvalError ?? 'Could not reject.'; return; }
+            rejectOpen = false; await update(); await invalidateAll();
+          }; }}>
+      <h2 id="reject-title" class="text-lg font-semibold mb-1">Reject this ticket</h2>
+      <p class="text-sm text-muted mb-3">The ticket is closed and the person is told why. They can open a new one.</p>
+      <label class="flex flex-col gap-1.5 mb-2">
+        <span class="text-sm text-muted">Reason (required)</span>
+        <textarea class="input" name="reason" rows="3" maxlength="500" bind:value={rejectReason} data-testid="reject-reason"
+                  placeholder="e.g. Please send this to the support address for your plan"></textarea>
+      </label>
+      {#if approvalError}<p class="text-sm mb-2" style="color: var(--color-danger);" data-testid="reject-error">{approvalError}</p>{/if}
+      <div class="flex justify-end gap-2">
+        <button type="button" class="btn" onclick={() => (rejectOpen = false)}>Cancel</button>
+        <button type="submit" class="btn btn-primary" disabled={approvalBusy || rejectReason.trim().length < 5} data-testid="reject-confirm">Reject ticket</button>
+      </div>
+    </form>
+  </div>
 {/if}
 
 <ExtendTimeModal

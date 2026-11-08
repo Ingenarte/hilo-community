@@ -11,7 +11,7 @@
   type GroupOption = { id: number; name: string; project_id: number; project_name: string };
 
   type Props = {
-    data: { projects: Project[]; users: UserOption[]; groups: GroupOption[] };
+    data: { projects: Project[]; users: UserOption[]; groups: GroupOption[]; isAdmin: boolean };
     form?: { error?: string; title?: string; body?: string } | null;
   };
 
@@ -368,7 +368,7 @@
         </p>
       {:else}
         <p class="text-fainter text-xs mt-2">
-          Don't see your project? Use <span class="font-semibold">+ Add</span>. Your ticket is created right away and the project waits for admin approval.
+          Don't see your project? Use <span class="font-semibold">+ Add</span>. The project waits for admin approval together with your ticket.
         </p>
       {/if}
 
@@ -430,6 +430,13 @@
       >
         {form.error}
       </div>
+    {/if}
+
+    {#if !data.isAdmin}
+      <p class="text-fainter text-xs" data-testid="approval-note">
+        An administrator reviews every new ticket before it starts. You will be notified when it is
+        approved, and you can add nothing more until then.
+      </p>
     {/if}
 
     <footer class="flex items-center justify-between pt-2">

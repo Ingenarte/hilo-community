@@ -16,8 +16,9 @@ import { DEFAULT_PRIORITY, checkUrgentRequest, isPriority } from '$lib/sla';
  * Rules (sprint-26may):
  *  - A ticket MUST be associated with a project. No project → 400.
  *  - `projectId`: must be a project the user is assigned to (admins bypass).
- *  - `newProjectName`: creates a new project with status='active' and
- *    auto-assigns the user to it. The admin can rename or archive it.
+ *  - `newProjectName`: admins create an active project; for users it is
+ *    created as 'pending' until an admin approves, renames or merges it.
+ *  - Tickets opened by users start as awaiting approval (admin decides).
  */
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'Unauthorized');
@@ -68,16 +69,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const info = db
 			.prepare(
 				`INSERT INTO projects (name, slug, status, created_by_user_id)
-				 VALUES (?, ?, 'active', ?)`
+				 VALUES (?, ?, ?, ?)`
 			)
-			.run(name, slug, locals.user.id);
+			.run(name, slug, locals.user.role === 'admin' ? 'active' : 'pending', locals.user.id);
 		projectId = Number(info.lastInsertRowid);
 
-		// Auto-assign the creating user to the new project
-		db.prepare('INSERT OR IGNORE INTO user_projects (user_id, project_id) VALUES (?, ?)').run(
-			locals.user.id,
-			projectId
-		);
+		// Admins get the project at once; for everyone else it waits for approval
+		// and the requester is only assigned when an admin approves it.
+		if (locals.user.role === 'admin') {
+			db.prepare('INSERT OR IGNORE INTO user_projects (user_id, project_id) VALUES (?, ?)').run(
+				locals.user.id,
+				projectId
+			);
+		}
 	} else if (typeof body.projectId === 'number') {
 		// Validate that the user is assigned to this project (admins bypass)
 		if (locals.user.role !== 'admin') {
@@ -96,7 +100,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		title,
 		projectIds: [projectId],
 		priority,
-		priorityReason
+		priorityReason,
+		approval: locals.user.role === 'admin' ? 'approved' : 'pending'
 	});
 
 	audit('ticket.created', {

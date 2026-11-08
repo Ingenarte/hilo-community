@@ -1,3 +1,4 @@
+import { countPendingApproval } from '$lib/server/tickets';
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { listProjects, queryTickets } from '$lib/server/tickets';
@@ -42,6 +43,7 @@ export const load: PageServerLoad = ({ locals, url }) => {
 		priority: safePriority,
 		projectId: projectId && Number.isFinite(projectId) ? projectId : undefined,
 		ownerId,
+		approval: isAdmin && url.searchParams.get('approval') === 'pending' ? 'pending' : undefined,
 		includeArchived: showArchived,
 		limit: perPage,
 		offset: (page - 1) * perPage
@@ -78,6 +80,8 @@ export const load: PageServerLoad = ({ locals, url }) => {
 					)
 					.all() as Array<{ id: number; email: string }>)
 			: [],
+		pendingApproval: isAdmin ? countPendingApproval() : 0,
+		approvalFilter: isAdmin && url.searchParams.get('approval') === 'pending',
 		filters: {
 			search,
 			status: safeStatus,

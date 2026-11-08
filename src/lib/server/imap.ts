@@ -28,7 +28,7 @@ import { db } from './db';
 import { config } from './env';
 import { log } from './logger';
 import { appendMessage, getTicket } from './tickets';
-import { TicketClosedError } from './tickets-messages';
+import { TicketClosedError, TicketNotApprovedError } from './tickets-messages';
 import { enqueueTicketClosedNotice } from './welcome';
 
 type ImapConfig = {
@@ -384,6 +384,10 @@ async function ingestRaw(raw: string) {
 				title: ticket.title
 			});
 			log.info('imap: reply to a closed ticket refused', { ticket_id: ticketId, from });
+			return;
+		}
+		if (err instanceof TicketNotApprovedError) {
+			log.info('imap: reply to a ticket awaiting approval refused', { ticket_id: ticketId, from });
 			return;
 		}
 		throw err;

@@ -12,6 +12,8 @@ import {
 	listFollowers,
 	listProjects,
 	listTicketExtensions,
+	approveTicket,
+	rejectTicket,
 	setTicketPriority,
 	setTicketStatus
 } from '$lib/server/tickets';
@@ -106,6 +108,44 @@ export const load: PageServerLoad = ({ locals, params }) => {
 };
 
 export const actions: Actions = {
+	approve: async ({ locals, params }) => {
+		if (!locals.user) throw redirect(302, '/login');
+		if (locals.user.role !== 'admin') throw error(403, 'Only an administrator can approve a ticket.');
+		const id = Number(params.id);
+		const t = Number.isFinite(id) ? getTicket(id) : undefined;
+		if (!t) throw error(404, 'Ticket not found');
+		if (!approveTicket(id, locals.user.id)) return fail(409, { approvalError: 'This ticket is not waiting for approval.' });
+		audit('ticket.approved', { actor: locals.user, target: `ticket:${id}`, detail: {} });
+		broadcast(id, 'edit', { id });
+		notifyTicketMovement({ ticketId: id, actor: locals.user, summary: 'Your ticket was approved' });
+		const row = db.prepare('SELECT u.email FROM users u WHERE u.id = ?').get(t.user_id) as { email: string } | undefined;
+		dispatchWebhooks('ticket.new', {
+			ticket_id: id,
+			title: t.title,
+			priority: t.priority,
+			status: 'open',
+			author: row?.email ?? '',
+			preview: 'Ticket approved',
+			url: `${config.publicBaseUrl.replace(/\/$/, '')}/tickets/${id}`,
+			brand: config.brand
+		});
+		return { ok: true };
+	},
+	reject: async ({ locals, params, request }) => {
+		if (!locals.user) throw redirect(302, '/login');
+		if (locals.user.role !== 'admin') throw error(403, 'Only an administrator can reject a ticket.');
+		const id = Number(params.id);
+		const t = Number.isFinite(id) ? getTicket(id) : undefined;
+		if (!t) throw error(404, 'Ticket not found');
+		const form = await request.formData();
+		const reason = String(form.get('reason') ?? '').trim();
+		if (reason.length < 5) return fail(400, { approvalError: 'Write a reason of at least 5 characters.' });
+		if (!rejectTicket(id, locals.user.id, reason)) return fail(409, { approvalError: 'This ticket is not waiting for approval.' });
+		audit('ticket.rejected', { actor: locals.user, target: `ticket:${id}`, detail: { reason } });
+		broadcast(id, 'edit', { id });
+		notifyTicketMovement({ ticketId: id, actor: locals.user, summary: `Your ticket was not approved: ${reason}` });
+		return { ok: true };
+	},
 	close: async ({ locals, params }) => {
 		if (!locals.user) throw redirect(302, '/login');
 		const id = Number(params.id);
