@@ -4,6 +4,11 @@ import { config } from '$lib/server/env';
 import { queryTickets } from '$lib/server/tickets';
 import { isPriority } from '$lib/sla';
 import { limited, requireAuth, ticketUrl, v1Error, v1Json } from '$lib/server/apiV1';
+import { TicketCreateError, openTicket } from '$lib/server/ticketCreate';
+import { appendMessage } from '$lib/server/tickets-messages';
+import { broadcast } from '$lib/server/sse';
+import { fanOutMessageNotification } from '$lib/server/notify';
+import { dispatchWebhooks } from '$lib/server/webhooks';
 
 const STATUSES = ['open', 'pending', 'closed', 'any'] as const;
 const SORTS = ['due', 'updated', 'created', 'id'] as const;
@@ -152,4 +157,131 @@ export const GET: RequestHandler = ({ locals, url }) => {
 		has_more: result.hasMore,
 		next_offset: result.hasMore ? offset + limit : null
 	});
+};
+
+/** Ticket bodies from integrations can be long (briefs, checklists), but bounded. */
+const MAX_API_TICKET_BODY_CHARS = 50000;
+
+/**
+ * POST /api/v1/tickets
+ * JSON: { title, body, priority?, priority_reason?, confirm_urgent?, project_id? | project_slug? }
+ * Needs a token with the "open tickets" capability (can_create). Validation is
+ * the one of the UI endpoint (shared `openTicket`). The ticket is owned by the
+ * token's user, `body` becomes the first message (flagged as written through a
+ * token), and the usual notifications fire.
+ *
+ * Approval: a token of an admin opens approved tickets (response clock running,
+ * `ticket.new` webhook); a token of a regular user opens tickets that wait for
+ * admin approval, exactly like tickets opened in the UI.
+ *
+ * A token restricted to a project uses it when no project is given and rejects
+ * any other project (403). Rate limit: 5 per minute and 30 per hour per token.
+ */
+export const POST: RequestHandler = async ({ locals, request }) => {
+	const auth = requireAuth(locals);
+	if (auth instanceof Response) return auth;
+	if (!auth.token.canCreate) return v1Error(403, 'This token cannot open tickets');
+
+	if (!(request.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) {
+		return v1Error(415, 'Content-Type must be application/json');
+	}
+	const payload = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+	if (!payload || typeof payload !== 'object') return v1Error(400, 'JSON object body is required');
+	if (typeof payload.body === 'string' && payload.body.length > MAX_API_TICKET_BODY_CHARS) {
+		return v1Error(400, `body must be at most ${MAX_API_TICKET_BODY_CHARS} characters`);
+	}
+
+	let projectId: number | null = null;
+	if (payload.project_id !== undefined && payload.project_id !== null) {
+		if (typeof payload.project_id !== 'number' || !Number.isInteger(payload.project_id)) {
+			return v1Error(400, 'project_id must be an integer');
+		}
+		projectId = payload.project_id;
+	} else if (typeof payload.project_slug === 'string' && payload.project_slug.trim()) {
+		const row = db
+			.prepare('SELECT id FROM projects WHERE slug = ? COLLATE NOCASE')
+			.get(payload.project_slug.trim()) as { id: number } | undefined;
+		if (!row) return v1Error(404, 'Project not found');
+		projectId = row.id;
+	} else if (auth.token.projectId !== null) {
+		projectId = auth.token.projectId;
+	}
+	if (auth.token.projectId !== null && projectId !== auth.token.projectId) {
+		return v1Error(403, 'This token can only open tickets in its own project');
+	}
+
+	const rlMinute = limited(auth.token, 'create-minute', 5, 60);
+	if (rlMinute) return rlMinute;
+	const rlHour = limited(auth.token, 'create-hour', 30, 3600);
+	if (rlHour) return rlHour;
+
+	let created;
+	try {
+		created = openTicket(
+			auth.user,
+			{
+				title: payload.title,
+				body: payload.body,
+				priority: payload.priority,
+				priorityReason: payload.priority_reason,
+				confirmUrgent: payload.confirm_urgent,
+				// The API never creates projects: a project is always required.
+				projectId: projectId ?? undefined
+			},
+			{ tokenId: auth.token.id }
+		);
+	} catch (err) {
+		if (err instanceof TicketCreateError) return v1Error(err.status, err.message);
+		throw err;
+	}
+
+	const { ticketId, title, body, priority, approval } = created;
+	const messageId = appendMessage({
+		ticketId,
+		senderId: auth.user.id,
+		senderRole: auth.user.role,
+		body,
+		viaTokenId: auth.token.id,
+		allowUnapproved: true
+	});
+	broadcast(ticketId, 'message', { id: messageId });
+	fanOutMessageNotification({
+		ticketId,
+		ticketTitle: title,
+		authorEmail: auth.user.email,
+		authorRole: auth.user.role,
+		body,
+		attachments: [],
+		sseKind: 'ticket.new',
+		fallbackPreview: '(new ticket)'
+	}).catch((err) => console.error('[notify] fan-out failed', err));
+
+	const url = ticketUrl(config.publicBaseUrl, ticketId);
+	// Same as the UI: webhooks fire now for admins, on approval for users.
+	if (approval === 'approved') {
+		dispatchWebhooks('ticket.new', {
+			ticket_id: ticketId,
+			title,
+			priority,
+			status: 'open',
+			author: auth.user.email,
+			preview: body,
+			url,
+			brand: config.brand
+		});
+	}
+
+	return v1Json(
+		{
+			id: ticketId,
+			url,
+			title,
+			status: 'open',
+			approval_status: approval,
+			priority,
+			project_id: created.projectId,
+			message_id: messageId
+		},
+		{ status: 201 }
+	);
 };

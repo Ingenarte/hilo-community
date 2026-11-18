@@ -16,10 +16,21 @@
 
   type Created = {
     token: string;
-    info: { id: number; expires_at: number; can_reply: boolean; ticket_id: number | null };
+    info: {
+      id: number;
+      expires_at: number;
+      can_reply: boolean;
+      can_create: boolean;
+      project_id: number | null;
+      ticket_id: number | null;
+    };
   };
 
   let canReply = $state(true);
+  let canCreate = $state(false);
+  /** '' = any of my projects. */
+  let createProjectId = $state('');
+  let projects = $state<Array<{ id: number; name: string; slug: string }>>([]);
   let busy = $state(false);
   let error = $state<string | null>(null);
   let created = $state<Created | null>(null);
@@ -28,10 +39,22 @@
   $effect(() => {
     if (open) {
       canReply = true;
+      canCreate = false;
+      createProjectId = '';
       busy = false;
       error = null;
       created = null;
       copied = null;
+    }
+  });
+
+  // Projects for the optional "open tickets only in" restriction.
+  $effect(() => {
+    if (open && canCreate && projects.length === 0) {
+      fetch('/api/projects')
+        .then((r) => (r.ok ? r.json() : { projects: [] }))
+        .then((d) => (projects = d.projects ?? []))
+        .catch(() => {});
     }
   });
 
@@ -42,6 +65,8 @@
           token: created.token,
           ticketId: created.info.ticket_id,
           canReply: created.info.can_reply,
+          canCreate: created.info.can_create,
+          projectId: created.info.project_id,
           expiresAt: created.info.expires_at
         })
       : ''
@@ -59,7 +84,13 @@
       const res = await fetch('/api/tokens', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticketId, canReply })
+        body: JSON.stringify({
+          ticketId,
+          canReply,
+          ...(ticketId == null && canCreate
+            ? { canCreate: true, projectId: createProjectId ? Number(createProjectId) : null }
+            : {})
+        })
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -146,6 +177,40 @@
           </span>
         </label>
 
+        {#if ticketId == null}
+          <label class="flex items-start gap-2.5 mb-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              class="h-5 w-5 mt-0.5"
+              data-testid="token-can-create"
+              bind:checked={canCreate}
+            />
+            <span class="text-sm">
+              Allow the agent to open new tickets
+              <span class="block text-xs text-fainter">
+                Tickets are opened in your name. If you are not an admin they wait for admin
+                approval.
+              </span>
+            </span>
+          </label>
+          {#if canCreate}
+            <div class="mb-4 ml-7">
+              <label class="label block mb-1.5" for="agent-token-project">Open tickets only in</label>
+              <select
+                id="agent-token-project"
+                class="input"
+                data-testid="token-project"
+                bind:value={createProjectId}
+              >
+                <option value="">Any of my projects</option>
+                {#each projects as p (p.id)}
+                  <option value={String(p.id)}>{p.name}</option>
+                {/each}
+              </select>
+            </div>
+          {/if}
+        {/if}
+
         {#if error}
           <p class="text-sm mb-3" style="color: var(--color-danger);" role="alert">{error}</p>
         {/if}
@@ -177,6 +242,11 @@
         <p class="text-xs text-fainter mb-4" data-testid="token-expiry">
           Expires {new Date(created.info.expires_at * 1000).toLocaleString()}
           · {created.info.can_reply ? 'can reply and change status' : 'read-only'}
+          {#if created.info.can_create}
+            · can open tickets{created.info.project_id != null
+              ? ` in ${projects.find((p) => p.id === created!.info.project_id)?.name ?? `project ${created.info.project_id}`}`
+              : ''}
+          {/if}
         </p>
 
         <label class="label block mb-1.5" for="agent-brief">Instructions for the agent</label>

@@ -13,6 +13,8 @@ export const GET: RequestHandler = ({ locals }) => {
 			name: auth.token.name,
 			ticket_id: auth.token.ticketId,
 			can_reply: auth.token.canReply,
+			can_create: auth.token.canCreate,
+			project_id: auth.token.projectId,
 			expires_at: auth.token.expiresAt,
 			expires_in_seconds: Math.max(0, auth.token.expiresAt - now)
 		},

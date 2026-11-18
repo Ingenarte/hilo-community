@@ -350,6 +350,8 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 	token_prefix  TEXT NOT NULL,
 	ticket_id     INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
 	can_reply     INTEGER NOT NULL DEFAULT 0,
+	can_create    INTEGER NOT NULL DEFAULT 0,
+	project_id    INTEGER REFERENCES projects(id) ON DELETE CASCADE,
 	expires_at    INTEGER NOT NULL,
 	created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
 	last_used_at  INTEGER,

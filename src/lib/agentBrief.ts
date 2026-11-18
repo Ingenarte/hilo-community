@@ -7,6 +7,10 @@ export type AgentBriefInput = {
 	/** Present for a token limited to one ticket. */
 	ticketId?: number | null;
 	canReply: boolean;
+	/** The token may open new tickets (POST /api/v1/tickets). */
+	canCreate?: boolean;
+	/** Ticket creation is restricted to this project id. */
+	projectId?: number | null;
 	/** Unix seconds. */
 	expiresAt: number;
 	maxReplyChars?: number;
@@ -22,12 +26,14 @@ export function buildAgentBrief(i: AgentBriefInput): string {
 			? `curl -s -H "Authorization: Bearer $HILO_TOKEN" ${base}/api/v1/tickets/${i.ticketId}`
 			: `curl -s -H "Authorization: Bearer $HILO_TOKEN" "${base}/api/v1/tickets?status=open&sort=due"`;
 	const target = i.ticketId != null ? i.ticketId : '<ticket id>';
+	const caps = [i.canReply ? 'may reply and change status' : 'read-only'];
+	if (i.canCreate) caps.push(i.projectId != null ? `may open tickets in project ${i.projectId}` : 'may open tickets');
 
 	const lines = [
 		`# Hilo agent brief${i.ticketId != null ? ` - ticket #${i.ticketId}` : ''}`,
 		'',
 		`Base URL: ${base}`,
-		`Token (Bearer, ${scope}, ${i.canReply ? 'may reply and change status' : 'read-only'}): ${i.token}`,
+		`Token (Bearer, ${scope}, ${caps.join(', ')}): ${i.token}`,
 		`Expires: ${new Date(i.expiresAt * 1000).toISOString()} (96 hours after creation)`,
 		'',
 		'Set it once: `export HILO_TOKEN=<the token above>`',
@@ -57,6 +63,23 @@ export function buildAgentBrief(i: AgentBriefInput): string {
 			`  -d '{"status":"pending"}' ${base}/api/v1/tickets/${target}   # open | pending | closed`,
 			'```',
 			`Replies are limited to ${max} characters (3 per minute, 20 per hour) and appear in the ticket marked as written by an agent.`
+		);
+	}
+	if (i.canCreate && i.ticketId == null) {
+		const project = i.projectId != null ? `"project_id":${i.projectId}` : '"project_slug":"<project slug>"';
+		lines.push(
+			'',
+			'## Open a ticket',
+			'```',
+			`curl -s -X POST -H "Authorization: Bearer $HILO_TOKEN" -H "Content-Type: application/json" \\`,
+			`  -d '{"title":"Short title","body":"What is needed",${project},"priority":"normal"}' ${base}/api/v1/tickets`,
+			`curl -s -X POST -H "Authorization: Bearer $HILO_TOKEN" -F "files=@screenshot.png" ${base}/api/v1/tickets/<new id>/attachments`,
+			'```',
+			'Returns `201 {"id", "url", "approval_status", ...}`. `priority` is urgent|high|normal|low (urgent also needs `priority_reason` and `confirm_urgent: true`). ' +
+				(i.projectId != null
+					? 'This token can only open tickets in its project; `project_id` may be omitted.'
+					: 'Use `project_id` or `project_slug` of a project the token owner is assigned to.') +
+				' Tickets opened by a non-admin wait for admin approval. Limit: 5 per minute, 30 per hour. Attachments go to the first message.'
 		);
 	}
 	lines.push(

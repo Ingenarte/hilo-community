@@ -29,6 +29,8 @@
     prefix: string;
     ticket_id: number | null;
     can_reply: boolean;
+    can_create: boolean;
+    project_id: number | null;
     expires_at: number;
     created_at: number;
     last_used_at: number | null;
@@ -689,7 +691,8 @@
     <div>
       <div class="text-base font-bold tracking-tight">Agent tokens</div>
       <p class="text-muted text-sm mt-1 leading-relaxed">
-        Let a coding agent (Claude Code, VS Code) read your tickets and write back. Tokens last
+        Let a coding agent (Claude Code, VS Code) or a script read your tickets, write back and,
+        if you allow it, open new tickets. Tokens last
         96 hours and only work on the agent API. To limit one to a single ticket, use
         "Generate agent token" in that ticket's sidebar.
       </p>
@@ -705,7 +708,9 @@
               <div class="font-medium truncate">{t.name}</div>
               <div class="text-xs text-fainter font-mono">
                 {t.prefix}… · {t.ticket_id != null ? `ticket #${t.ticket_id}` : 'all my tickets'}
-                · {t.can_reply ? 'can reply' : 'read-only'} · expires {fmtExpiry(t.expires_at)}
+                · {t.can_reply ? 'can reply' : 'read-only'}
+                {#if t.can_create}· can open tickets{t.project_id != null ? ` (project ${t.project_id})` : ''}{/if}
+                · expires {fmtExpiry(t.expires_at)}
               </div>
             </div>
             <button type="button" class="btn" onclick={() => revokeToken(t.id)}>Revoke</button>

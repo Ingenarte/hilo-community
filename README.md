@@ -116,7 +116,9 @@ behind Caddy / nginx (templates in [`deploy/`](deploy/)).
   can extend a deadline with a written reason.
 - **Agent tokens and API.** Per-user tokens let scripts and AI agents read and
   reply to tickets through `/api/v1`. A one-click Copy button on each ticket
-  creates a 96-hour token and copies it with the agent instructions.
+  creates a 96-hour token and copies it with the agent instructions. A token
+  can also be allowed to open tickets (optionally in one project only), so
+  integrations can file work into Hilo. See [Agent API](#agent-api).
 - **Inbound email → ticket** (IMAP polling).
 - **Web Push notifications** (VAPID) with per-user quiet hours and daily
   digest throttling.
@@ -217,6 +219,48 @@ Cleanup with [`scripts/cleanup.js`](scripts/cleanup.js) (weekly cron).
 renders the landing-page promo (`Promo`) and the four PWA install explainer
 videos into `static/`. See [`video-remotion/NARRATION.md`](video-remotion/NARRATION.md)
 for the narration script and HeyGen avatar slots.
+
+---
+
+## Agent API
+
+Tokens are created in Preferences (all my tickets) or from a ticket sidebar
+(one ticket). They last 96 hours, work only on `/api/v1/*` and are sent as
+`Authorization: Bearer hilo_...`. Capabilities: read (always), reply and change
+status (`can_reply`), open tickets (`can_create`, optionally restricted to one
+project; not available on single-ticket tokens).
+
+- `GET /api/v1/me`, `GET /api/v1/projects`, `GET /api/v1/tickets` (filters),
+  `GET /api/v1/tickets/:id` (`?format=md` for a zip with media),
+  `GET /api/v1/attachments/:id`.
+- `POST /api/v1/tickets/:id/messages` and `PATCH /api/v1/tickets/:id` (`can_reply`).
+- `POST /api/v1/tickets` (`can_create`), rate limited to 5 per minute and 30
+  per hour per token:
+
+  ```
+  curl -X POST -H "Authorization: Bearer $HILO_TOKEN" -H "Content-Type: application/json" \
+    -d '{"title":"New landing page","body":"What is needed...","priority":"normal","project_slug":"website"}' \
+    https://support.example.com/api/v1/tickets
+  # 201 {"id":42,"url":"https://support.example.com/tickets/42","title":"New landing page",
+  #      "status":"open","approval_status":"pending","priority":"normal","project_id":3,"message_id":97}
+  ```
+
+  Validation matches the web UI: `title` and `body` are required (body up to
+  50,000 characters), `priority` is `urgent|high|normal|low` (urgent also needs
+  `priority_reason` and `confirm_urgent: true`), and the project (`project_id`
+  or `project_slug`) must be active and assigned to the token owner (admins:
+  any active project). A project-restricted token defaults to its project and
+  gets `403` for any other. The ticket is owned by the token's user and `body`
+  becomes its first message. Approval follows the owner's role: a token of an
+  admin opens approved tickets (response clock running, `ticket.new` webhook);
+  a token of a regular user opens tickets that wait for admin approval, like
+  tickets opened in the UI. Errors: `400` validation, `403` capability or
+  project, `404` unknown project, `415` wrong content type, `429` rate limit.
+- `POST /api/v1/tickets/:id/attachments` (`can_create` or `can_reply`),
+  multipart field `files` (repeatable, up to 10 per request, 10 requests per
+  minute): attaches the files to the latest message that same token posted on
+  the ticket, with the same `MAX_UPLOAD_MB` and file type rules as the UI.
+  Returns `201 {"ok":true,"message_id":97,"attachments":[{"id","filename","mime_type","size_bytes"}]}`.
 
 ---
 

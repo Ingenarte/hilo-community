@@ -58,6 +58,11 @@ ensureColumn('tickets', 'group_id', `group_id INTEGER`);
 ensureColumn('messages', 'via_token_id', `via_token_id INTEGER`);
 ensureColumn('tickets', 'sla_due_at', `sla_due_at INTEGER`);
 ensureColumn('tickets', 'priority_reason', `priority_reason TEXT`);
+// API token capability to open tickets, optionally restricted to one project.
+// SQLite ALTER TABLE ADD COLUMN does not accept REFERENCES: new databases get
+// the FK from schema.sql, upgrades check the project in application code.
+ensureColumn('api_tokens', 'can_create', `can_create INTEGER NOT NULL DEFAULT 0`);
+ensureColumn('api_tokens', 'project_id', `project_id INTEGER`);
 db.exec('CREATE INDEX IF NOT EXISTS idx_tickets_sla_due ON tickets(sla_due_at)');
 
 // The response target restarts with every public message, from either side:

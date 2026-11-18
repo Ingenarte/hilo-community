@@ -17,6 +17,10 @@ export type ApiTokenInfo = {
 	name: string;
 	ticketId: number | null;
 	canReply: boolean;
+	/** May open new tickets (POST /api/v1/tickets). */
+	canCreate: boolean;
+	/** When set, new tickets can only be opened in this project. */
+	projectId: number | null;
 	expiresAt: number;
 };
 
@@ -26,6 +30,8 @@ export type ApiTokenPublic = {
 	prefix: string;
 	ticket_id: number | null;
 	can_reply: boolean;
+	can_create: boolean;
+	project_id: number | null;
 	expires_at: number;
 	created_at: number;
 	last_used_at: number | null;
@@ -38,6 +44,8 @@ type Row = {
 	token_prefix: string;
 	ticket_id: number | null;
 	can_reply: 0 | 1;
+	can_create: 0 | 1;
+	project_id: number | null;
 	expires_at: number;
 	created_at: number;
 	last_used_at: number | null;
@@ -50,6 +58,8 @@ const toPublic = (r: Row): ApiTokenPublic => ({
 	prefix: r.token_prefix,
 	ticket_id: r.ticket_id,
 	can_reply: r.can_reply === 1,
+	can_create: r.can_create === 1,
+	project_id: r.project_id,
 	expires_at: r.expires_at,
 	created_at: r.created_at,
 	last_used_at: r.last_used_at
@@ -70,6 +80,8 @@ export function createApiToken(args: {
 	name: string;
 	ticketId?: number | null;
 	canReply: boolean;
+	canCreate?: boolean;
+	projectId?: number | null;
 }): { token: string; info: ApiTokenPublic } {
 	// Housekeeping: forget tokens that expired more than 30 days ago.
 	db.prepare('DELETE FROM api_tokens WHERE expires_at < unixepoch() - 2592000').run();
@@ -77,8 +89,8 @@ export function createApiToken(args: {
 	const token = generateToken();
 	const info = db
 		.prepare(
-			`INSERT INTO api_tokens (user_id, name, token_hash, token_prefix, ticket_id, can_reply, expires_at)
-			 VALUES (?, ?, ?, ?, ?, ?, unixepoch() + ?)`
+			`INSERT INTO api_tokens (user_id, name, token_hash, token_prefix, ticket_id, can_reply, can_create, project_id, expires_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch() + ?)`
 		)
 		.run(
 			args.userId,
@@ -87,6 +99,8 @@ export function createApiToken(args: {
 			tokenPrefix(token),
 			args.ticketId ?? null,
 			args.canReply ? 1 : 0,
+			args.canCreate ? 1 : 0,
+			args.projectId ?? null,
 			TOKEN_TTL_SECONDS
 		);
 	const row = db.prepare('SELECT * FROM api_tokens WHERE id = ?').get(Number(info.lastInsertRowid)) as Row;
@@ -126,6 +140,8 @@ export function authenticateToken(
 			name: row.name,
 			ticketId: row.ticket_id,
 			canReply: row.can_reply === 1,
+			canCreate: row.can_create === 1,
+			projectId: row.project_id,
 			expiresAt: row.expires_at
 		}
 	};

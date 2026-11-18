@@ -1,114 +1,29 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/server/db';
-import { createTicket } from '$lib/server/tickets';
-import { audit } from '$lib/server/audit';
-import { DEFAULT_PRIORITY, checkUrgentRequest, isPriority } from '$lib/sla';
+import { TicketCreateError, openTicket } from '$lib/server/ticketCreate';
 
 /**
  * POST /api/tickets
  * JSON body: { title, body, priority?, priorityReason?, confirmUrgent?, projectId?, newProjectName? }
  *
- * `priority` is urgent|high|normal|low (default normal) and sets the response
- * target (24/48/72/96 h). Urgent also needs `priorityReason` (>= 10 chars) and
- * `confirmUrgent: true`.
- *
- * Rules (sprint-26may):
- *  - A ticket MUST be associated with a project. No project → 400.
- *  - `projectId`: must be a project the user is assigned to (admins bypass).
+ * Validation and creation live in `openTicket` (shared with POST /api/v1/tickets):
+ *  - `priority` is urgent|high|normal|low (default normal) and sets the response
+ *    target (24/48/72/96 h). Urgent also needs `priorityReason` (>= 10 chars) and
+ *    `confirmUrgent: true`.
+ *  - A ticket MUST be associated with a project. No project: 400.
+ *  - `projectId`: an active project the user is assigned to (admins bypass).
  *  - `newProjectName`: admins create an active project; for users it is
  *    created as 'pending' until an admin approves, renames or merges it.
  *  - Tickets opened by users start as awaiting approval (admin decides).
  */
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'Unauthorized');
-
-	const body = (await request.json().catch(() => ({}))) as {
-		title?: string;
-		body?: string;
-		priority?: string;
-		priorityReason?: string;
-		confirmUrgent?: boolean | string;
-		projectId?: number;
-		newProjectName?: string;
-	};
-
-	const title = String(body.title || '').trim();
-	const messageBody = String(body.body || '').trim();
-	if (!title) throw error(400, 'title is required');
-	if (!messageBody) throw error(400, 'body is required');
-
-	const priority = body.priority ?? DEFAULT_PRIORITY;
-	if (!isPriority(priority)) throw error(400, 'priority must be urgent, high, normal or low');
-	let priorityReason: string | null = null;
-	if (priority === 'urgent') {
-		const check = checkUrgentRequest(body.priorityReason, body.confirmUrgent);
-		if (!check.ok) throw error(400, check.error);
-		priorityReason = check.reason;
+	const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+	try {
+		const created = openTicket(locals.user, body);
+		return json({ ok: true, ticketId: created.ticketId });
+	} catch (err) {
+		if (err instanceof TicketCreateError) throw error(err.status, err.message);
+		throw err;
 	}
-
-	let projectId: number;
-
-	if (body.newProjectName && String(body.newProjectName).trim()) {
-		const name = String(body.newProjectName).trim();
-		// Build a slug, handling collisions with a numeric suffix
-		const slugify = (s: string) =>
-			s
-				.toLowerCase()
-				.replace(/[^a-z0-9]+/g, '-')
-				.replace(/^-|-$/g, '')
-				.slice(0, 60) || 'project';
-
-		let slug = slugify(name);
-		let suffix = 0;
-		while (db.prepare('SELECT 1 FROM projects WHERE slug = ?').get(slug)) {
-			suffix += 1;
-			slug = `${slugify(name)}-${suffix}`;
-		}
-
-		const info = db
-			.prepare(
-				`INSERT INTO projects (name, slug, status, created_by_user_id)
-				 VALUES (?, ?, ?, ?)`
-			)
-			.run(name, slug, locals.user.role === 'admin' ? 'active' : 'pending', locals.user.id);
-		projectId = Number(info.lastInsertRowid);
-
-		// Admins get the project at once; for everyone else it waits for approval
-		// and the requester is only assigned when an admin approves it.
-		if (locals.user.role === 'admin') {
-			db.prepare('INSERT OR IGNORE INTO user_projects (user_id, project_id) VALUES (?, ?)').run(
-				locals.user.id,
-				projectId
-			);
-		}
-	} else if (typeof body.projectId === 'number') {
-		// Validate that the user is assigned to this project (admins bypass)
-		if (locals.user.role !== 'admin') {
-			const ok = db
-				.prepare('SELECT 1 FROM user_projects WHERE user_id = ? AND project_id = ?')
-				.get(locals.user.id, body.projectId);
-			if (!ok) throw error(403, 'You are not assigned to this project');
-		}
-		projectId = body.projectId;
-	} else {
-		throw error(400, 'A project is required');
-	}
-
-	const ticketId = createTicket({
-		userId: locals.user.id,
-		title,
-		projectIds: [projectId],
-		priority,
-		priorityReason,
-		approval: locals.user.role === 'admin' ? 'approved' : 'pending'
-	});
-
-	audit('ticket.created', {
-		actor: locals.user,
-		target: `ticket:${ticketId}`,
-		detail: { title, projectId, priority, priorityReason }
-	});
-
-	return json({ ok: true, ticketId });
 };

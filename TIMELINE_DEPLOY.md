@@ -10,6 +10,7 @@ dependency bumps, tests, and sprint artefacts.
 
 ## 2026-11-18
 
+- Agent tokens can now be allowed to open new tickets, optionally in one project only, so scripts and integrations can file work into Hilo through the API. Tickets opened this way by non-admins still wait for admin approval.
 - A small Copy button next to "Generate agent token" creates a 96-hour token for the ticket and copies it with the agent instructions in one click.
 
 ## 2026-11-08

@@ -9,14 +9,19 @@ import {
 } from '$lib/server/apiTokens';
 import { rateLimit } from '$lib/server/rateLimit';
 import { canAccessTicket, getTicket } from '$lib/server/tickets';
+import { db } from '$lib/server/db';
 
 /**
  * Token management. Browser session only: the hook rejects bearer tokens on
  * every path outside /api/v1/*, so a token can never mint or list tokens.
  *
  * GET  /api/tokens  -> my active tokens (never the secret)
- * POST /api/tokens  { ticketId?: number, canReply?: boolean, name?: string }
+ * POST /api/tokens  { ticketId?: number, canReply?: boolean, canCreate?: boolean,
+ *                     projectId?: number, name?: string }
  *   Creates a token that expires in 96 hours. The secret is returned once.
+ *   `canCreate` lets the token open tickets (POST /api/v1/tickets); it cannot be
+ *   combined with `ticketId`. `projectId` restricts ticket creation to one
+ *   active project the user is assigned to (admins: any active project).
  */
 export const GET: RequestHandler = ({ locals }) => {
 	if (!locals.user) throw error(401, 'Unauthorized');
@@ -42,6 +47,8 @@ export const POST: RequestHandler = async ({ locals, request, url }) => {
 	const body = (await request.json().catch(() => ({}))) as {
 		ticketId?: unknown;
 		canReply?: unknown;
+		canCreate?: unknown;
+		projectId?: unknown;
 		name?: unknown;
 	};
 
@@ -52,6 +59,25 @@ export const POST: RequestHandler = async ({ locals, request, url }) => {
 		const t = getTicket(id);
 		if (!t || !canAccessTicket(locals.user, t)) throw error(404, 'Ticket not found');
 		ticketId = id;
+	}
+
+	const canCreate = body.canCreate === true;
+	if (canCreate && ticketId !== null) {
+		throw error(400, 'A token limited to one ticket cannot open new tickets');
+	}
+	let projectId: number | null = null;
+	if (body.projectId !== undefined && body.projectId !== null) {
+		if (!canCreate) throw error(400, 'projectId only applies to tokens that can open tickets');
+		const id = Number(body.projectId);
+		if (!Number.isInteger(id) || id <= 0) throw error(400, 'projectId must be a project id');
+		const p = db.prepare('SELECT status FROM projects WHERE id = ?').get(id) as
+			| { status: string }
+			| undefined;
+		const assigned =
+			locals.user.role === 'admin' ||
+			!!db.prepare('SELECT 1 FROM user_projects WHERE user_id = ? AND project_id = ?').get(locals.user.id, id);
+		if (!p || p.status !== 'active' || !assigned) throw error(404, 'Project not found');
+		projectId = id;
 	}
 
 	if (countActiveApiTokens(locals.user.id) >= MAX_ACTIVE_TOKENS) {
@@ -66,11 +92,24 @@ export const POST: RequestHandler = async ({ locals, request, url }) => {
 				? `Ticket #${ticketId} agent`
 				: 'Agent token';
 
-	const { token, info } = createApiToken({ userId: locals.user.id, name, ticketId, canReply });
+	const { token, info } = createApiToken({
+		userId: locals.user.id,
+		name,
+		ticketId,
+		canReply,
+		canCreate,
+		projectId
+	});
 	audit('token.created', {
 		actor: locals.user,
 		target: ticketId !== null ? `ticket:${ticketId}` : `user:${locals.user.id}`,
-		detail: { token_id: info.id, can_reply: canReply, expires_at: info.expires_at }
+		detail: {
+			token_id: info.id,
+			can_reply: canReply,
+			can_create: canCreate,
+			project_id: projectId,
+			expires_at: info.expires_at
+		}
 	});
 
 	return json({ token, info }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
