@@ -115,7 +115,8 @@ behind Caddy / nginx (templates in [`deploy/`](deploy/)).
   summary by email, and can tune or switch them off in Preferences. Admins
   can extend a deadline with a written reason.
 - **Agent tokens and API.** Per-user tokens let scripts and AI agents read and
-  reply to tickets through `/api/v1`.
+  reply to tickets through `/api/v1`. A one-click Copy button on each ticket
+  creates a 96-hour token and copies it with the agent instructions.
 - **Inbound email → ticket** (IMAP polling).
 - **Web Push notifications** (VAPID) with per-user quiet hours and daily
   digest throttling.

@@ -8,6 +8,10 @@ dependency bumps, tests, and sprint artefacts.
 
 ---
 
+## 2026-11-18
+
+- A small Copy button next to "Generate agent token" creates a 96-hour token for the ticket and copies it with the agent instructions in one click.
+
 ## 2026-11-08
 
 - New tickets from users now wait for an admin to approve or reject them. Until then the ticket is private, the response clock does not run and the user cannot add messages; the user is told the outcome.

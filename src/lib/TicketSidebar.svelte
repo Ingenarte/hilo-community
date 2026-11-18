@@ -17,6 +17,7 @@
   import { onMount } from 'svelte';
   import UrgentReasonModal from './UrgentReasonModal.svelte';
   import AgentTokenModal from './AgentTokenModal.svelte';
+  import { buildAgentBrief } from '$lib/agentBrief';
   import {
     PRIORITY_LABEL,
     PRIORITY_ORDER,
@@ -137,6 +138,43 @@
   let prioritySelect = $state<HTMLSelectElement | null>(null);
   let urgentModalOpen = $state(false);
   let agentTokenOpen = $state(false);
+  let quickCopy = $state<'idle' | 'busy' | 'done' | 'error'>('idle');
+
+  /** One click: create a reply-enabled 96 h token for this ticket and copy token + instructions. */
+  async function copyAgentToken() {
+    if (quickCopy === 'busy') return;
+    quickCopy = 'busy';
+    try {
+      const res = await fetch('/api/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticketId: ticket.id, canReply: true })
+      });
+      if (!res.ok) throw new Error('token');
+      const created = await res.json();
+      const text = buildAgentBrief({
+        baseUrl: location.origin,
+        token: created.token,
+        ticketId: created.info.ticket_id,
+        canReply: created.info.can_reply,
+        expiresAt: created.info.expires_at
+      });
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      quickCopy = 'done';
+    } catch {
+      quickCopy = 'error';
+    }
+    setTimeout(() => (quickCopy = 'idle'), 1800);
+  }
   let hiddenReason = $state('');
   let hiddenConfirm = $state('');
   let priorityError = $state<string | null>(null);
@@ -465,9 +503,23 @@
     <p class="text-xs text-muted mb-2.5 leading-relaxed">
       Give a coding agent a 96-hour token to read this ticket, work on it and write a short reply.
     </p>
-    <button type="button" class="btn btn-sm w-full" onclick={() => (agentTokenOpen = true)}>
-      Generate agent token
-    </button>
+    <div class="flex items-stretch gap-2">
+      <button type="button" class="btn btn-sm min-w-0 flex-1 whitespace-normal leading-tight" onclick={() => (agentTokenOpen = true)}>
+        Generate agent token
+      </button>
+      <button
+        type="button"
+        class="btn btn-sm shrink-0"
+        data-testid="agent-token-quick-copy"
+        title="Create a 96-hour token and copy it with the agent instructions"
+        aria-label="Create an agent token and copy it with the instructions"
+        disabled={quickCopy === 'busy'}
+        onclick={copyAgentToken}
+      >
+        {quickCopy === 'done' ? 'Copied' : quickCopy === 'error' ? 'Failed' : quickCopy === 'busy' ? '…' : 'Copy'}
+      </button>
+    </div>
+    <span class="sr-only" role="status" aria-live="polite">{quickCopy === 'done' ? 'Agent token and instructions copied' : ''}</span>
   </div>
 
   <div class="panel-section">
