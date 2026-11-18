@@ -10,6 +10,7 @@ dependency bumps, tests, and sprint artefacts.
 
 ## 2026-11-18
 
+- Admins can now give an agent token a longer lifetime (30, 90 or 365 days) for server-to-server integrations. Long-lived tokens are labelled in Preferences with their expiry date and can be revoked at any time.
 - Agent tokens can now be allowed to open new tickets, optionally in one project only, so scripts and integrations can file work into Hilo through the API. Tickets opened this way by non-admins still wait for admin approval.
 - A small Copy button next to "Generate agent token" creates a 96-hour token for the ticket and copies it with the agent instructions in one click.
 

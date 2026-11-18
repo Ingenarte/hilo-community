@@ -1,7 +1,46 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-/** Agent tokens live 96 hours, then stop working. */
+/** Agent tokens live 96 hours by default, then stop working. */
 export const TOKEN_TTL_SECONDS = 96 * 3600;
+export const DEFAULT_TOKEN_TTL_DAYS = 4;
+/** Lifetimes an admin can pick for a token (days), before the instance cap. */
+export const TOKEN_TTL_DAY_CHOICES = [4, 30, 90, 365] as const;
+export const DEFAULT_MAX_TOKEN_TTL_DAYS = 365;
+
+/** Parses API_TOKEN_MAX_TTL_DAYS; invalid or empty values fall back to 365, never below 4. */
+export function parseMaxTtlDays(raw: string | undefined): number {
+	const n = Number(raw);
+	if (!raw || !Number.isInteger(n) || n <= 0) return DEFAULT_MAX_TOKEN_TTL_DAYS;
+	return Math.max(DEFAULT_TOKEN_TTL_DAYS, n);
+}
+
+/** The lifetimes (days) a user may choose: admins get the choices up to the cap, others only the default. */
+export function allowedTtlDays(isAdmin: boolean, maxDays: number): number[] {
+	if (!isAdmin) return [DEFAULT_TOKEN_TTL_DAYS];
+	return TOKEN_TTL_DAY_CHOICES.filter((d) => d <= maxDays);
+}
+
+/**
+ * Validates a requested lifetime. Returns the lifetime in seconds, or an error
+ * message. An absent value means the 96 hour default.
+ */
+export function resolveTokenTtl(
+	requested: unknown,
+	isAdmin: boolean,
+	maxDays: number
+): { seconds: number } | { error: string } {
+	if (requested === undefined || requested === null) return { seconds: TOKEN_TTL_SECONDS };
+	const days = Number(requested);
+	const allowed = allowedTtlDays(isAdmin, maxDays);
+	if (!Number.isInteger(days) || !allowed.includes(days)) {
+		return {
+			error: isAdmin
+				? `ttlDays must be one of ${allowed.join(', ')}`
+				: 'Only admins can choose a token lifetime'
+		};
+	}
+	return { seconds: days === DEFAULT_TOKEN_TTL_DAYS ? TOKEN_TTL_SECONDS : days * 86400 };
+}
 export const TOKEN_PREFIX = 'hilo_';
 
 export function generateToken(): string {

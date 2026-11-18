@@ -3,6 +3,7 @@ import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { SCHEDULES } from '$lib/server/schedule';
 import { passkeysEnabled } from '$lib/server/passkeys';
+import { tokenTtlChoices } from '$lib/server/apiTokens';
 
 export const load: PageServerLoad = ({ locals }) => {
 	if (!locals.user) throw redirect(302, '/login');
@@ -10,5 +11,10 @@ export const load: PageServerLoad = ({ locals }) => {
 		(db.prepare('SELECT email_schedule FROM users WHERE id = ?').get(locals.user.id) as
 			| { email_schedule: string }
 			| undefined)?.email_schedule ?? 'immediate';
-	return { schedule, schedulePresets: SCHEDULES, passkeysEnabled: passkeysEnabled() };
+	return {
+		schedule,
+		schedulePresets: SCHEDULES,
+		passkeysEnabled: passkeysEnabled(),
+		tokenTtlChoices: tokenTtlChoices(locals.user.role === 'admin')
+	};
 };

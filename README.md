@@ -196,6 +196,7 @@ highlights - see the example file for the full annotated set.
 | `REMINDERS_ENABLED` | no | `1` | Set `0` to switch deadline reminder emails off. |
 | `DEFAULT_TIMEZONE` | no | `Europe/Rome` | Time zone for reminder schedules when a user has none. |
 | `PWNED_PASSWORDS_CHECK` | no | `1` | Set `0` to skip the breached-password check. |
+| `API_TOKEN_MAX_TTL_DAYS` | no | `365` | Longest lifetime an admin can choose for an agent token (choices: 4, 30, 90, 365 days). |
 
 ---
 
@@ -225,10 +226,17 @@ for the narration script and HeyGen avatar slots.
 ## Agent API
 
 Tokens are created in Preferences (all my tickets) or from a ticket sidebar
-(one ticket). They last 96 hours, work only on `/api/v1/*` and are sent as
+(one ticket). They last 96 hours by default, work only on `/api/v1/*` and are sent as
 `Authorization: Bearer hilo_...`. Capabilities: read (always), reply and change
 status (`can_reply`), open tickets (`can_create`, optionally restricted to one
 project; not available on single-ticket tokens).
+
+Admins can create long-lived service tokens for server-to-server integrations:
+the token modal in Preferences offers an "Expires in" choice (96 hours, 30, 90
+or 365 days, capped by `API_TOKEN_MAX_TTL_DAYS`), also available as `ttlDays`
+on `POST /api/tokens`. Non-admin users always get 96 hours. Long-lived tokens
+are labelled in the Preferences token list with their expiry date and can be
+revoked there at any time.
 
 - `GET /api/v1/me`, `GET /api/v1/projects`, `GET /api/v1/tickets` (filters),
   `GET /api/v1/tickets/:id` (`?format=md` for a zip with media),

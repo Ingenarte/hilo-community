@@ -59,9 +59,11 @@
   }
   function fmtExpiry(unix: number) {
     return new Date(unix * 1000).toLocaleString([], {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
   }
+  /** Tokens that outlive the 96 hour default (admin-issued service tokens). */
+  const isLongLived = (t: ApiToken) => t.expires_at - t.created_at > 96 * 3600 + 60;
   onMount(loadTokens);
 
   // ── Deadline reminders ────────────────────────────────────────────────────
@@ -236,6 +238,7 @@
       schedule: string;
       schedulePresets: SchedulePreset[];
       passkeysEnabled: boolean;
+      tokenTtlChoices: number[];
     };
   };
 
@@ -693,7 +696,8 @@
       <p class="text-muted text-sm mt-1 leading-relaxed">
         Let a coding agent (Claude Code, VS Code) or a script read your tickets, write back and,
         if you allow it, open new tickets. Tokens last
-        96 hours and only work on the agent API. To limit one to a single ticket, use
+        96 hours{data.tokenTtlChoices.length > 1 ? ' unless you choose a longer lifetime' : ''} and
+        only work on the agent API. To limit one to a single ticket, use
         "Generate agent token" in that ticket's sidebar.
       </p>
     </div>
@@ -705,12 +709,22 @@
         {#each tokens as t (t.id)}
           <li class="flex items-center gap-3 text-sm" data-token-id={t.id}>
             <div class="min-w-0 flex-1">
-              <div class="font-medium truncate">{t.name}</div>
+              <div class="font-medium truncate">
+                {t.name}
+                {#if isLongLived(t)}
+                  <span
+                    class="ml-1 rounded px-1.5 py-0.5 text-[11px] font-semibold align-middle"
+                    style="background: color-mix(in srgb, var(--color-warning, #d97706) 18%, transparent); color: var(--color-warning, #d97706);"
+                    data-testid="token-long-lived"
+                    title="Outlives the 96 hour default; revoke it when no longer needed"
+                  >Long-lived</span>
+                {/if}
+              </div>
               <div class="text-xs text-fainter font-mono">
                 {t.prefix}… · {t.ticket_id != null ? `ticket #${t.ticket_id}` : 'all my tickets'}
                 · {t.can_reply ? 'can reply' : 'read-only'}
                 {#if t.can_create}· can open tickets{t.project_id != null ? ` (project ${t.project_id})` : ''}{/if}
-                · expires {fmtExpiry(t.expires_at)}
+                · <span data-testid="token-expires">expires {fmtExpiry(t.expires_at)}</span>
               </div>
             </div>
             <button type="button" class="btn" onclick={() => revokeToken(t.id)}>Revoke</button>
@@ -733,6 +747,7 @@
 <AgentTokenModal
   open={tokenModalOpen}
   ticketId={null}
+  ttlChoices={data.tokenTtlChoices}
   onclose={() => (tokenModalOpen = false)}
   oncreated={loadTokens}
 />

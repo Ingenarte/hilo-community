@@ -5,8 +5,10 @@ import {
 	MAX_ACTIVE_TOKENS,
 	countActiveApiTokens,
 	createApiToken,
-	listApiTokens
+	listApiTokens,
+	maxTokenTtlDays
 } from '$lib/server/apiTokens';
+import { resolveTokenTtl } from '$lib/server/tokenCrypto';
 import { rateLimit } from '$lib/server/rateLimit';
 import { canAccessTicket, getTicket } from '$lib/server/tickets';
 import { db } from '$lib/server/db';
@@ -17,8 +19,11 @@ import { db } from '$lib/server/db';
  *
  * GET  /api/tokens  -> my active tokens (never the secret)
  * POST /api/tokens  { ticketId?: number, canReply?: boolean, canCreate?: boolean,
- *                     projectId?: number, name?: string }
+ *                     projectId?: number, name?: string, ttlDays?: number }
  *   Creates a token that expires in 96 hours. The secret is returned once.
+ *   Admins may pass `ttlDays` (4, 30, 90 or 365, capped by
+ *   API_TOKEN_MAX_TTL_DAYS) for long-lived service tokens; other users may
+ *   only use the default.
  *   `canCreate` lets the token open tickets (POST /api/v1/tickets); it cannot be
  *   combined with `ticketId`. `projectId` restricts ticket creation to one
  *   active project the user is assigned to (admins: any active project).
@@ -50,7 +55,11 @@ export const POST: RequestHandler = async ({ locals, request, url }) => {
 		canCreate?: unknown;
 		projectId?: unknown;
 		name?: unknown;
+		ttlDays?: unknown;
 	};
+
+	const ttl = resolveTokenTtl(body.ttlDays, locals.user.role === 'admin', maxTokenTtlDays());
+	if ('error' in ttl) throw error(400, ttl.error);
 
 	let ticketId: number | null = null;
 	if (body.ticketId !== undefined && body.ticketId !== null) {
@@ -98,7 +107,8 @@ export const POST: RequestHandler = async ({ locals, request, url }) => {
 		ticketId,
 		canReply,
 		canCreate,
-		projectId
+		projectId,
+		ttlSeconds: ttl.seconds
 	});
 	audit('token.created', {
 		actor: locals.user,
@@ -108,6 +118,7 @@ export const POST: RequestHandler = async ({ locals, request, url }) => {
 			can_reply: canReply,
 			can_create: canCreate,
 			project_id: projectId,
+			ttl_seconds: ttl.seconds,
 			expires_at: info.expires_at
 		}
 	});

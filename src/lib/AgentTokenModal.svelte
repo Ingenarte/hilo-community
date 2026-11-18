@@ -10,9 +10,16 @@
     onclose: () => void;
     /** Called after a token was created (e.g. to refresh a list). */
     oncreated?: () => void;
+    /**
+     * Lifetimes (days) the user may pick. More than one entry shows the admin-only
+     * "Expires in" selector; the first entry is the default (4 days = 96 hours).
+     */
+    ttlChoices?: number[];
   };
 
-  const { open, ticketId = null, onclose, oncreated }: Props = $props();
+  const { open, ticketId = null, onclose, oncreated, ttlChoices = [4] }: Props = $props();
+
+  const ttlLabel = (days: number) => (days === 4 ? '96 hours (default)' : days === 365 ? '1 year' : `${days} days`);
 
   type Created = {
     token: string;
@@ -28,6 +35,7 @@
 
   let canReply = $state(true);
   let canCreate = $state(false);
+  let ttlDays = $state(4);
   /** '' = any of my projects. */
   let createProjectId = $state('');
   let projects = $state<Array<{ id: number; name: string; slug: string }>>([]);
@@ -40,6 +48,7 @@
     if (open) {
       canReply = true;
       canCreate = false;
+      ttlDays = ttlChoices[0] ?? 4;
       createProjectId = '';
       busy = false;
       error = null;
@@ -87,6 +96,7 @@
         body: JSON.stringify({
           ticketId,
           canReply,
+          ...(ttlChoices.length > 1 && ttlDays !== 4 ? { ttlDays } : {}),
           ...(ticketId == null && canCreate
             ? { canCreate: true, projectId: createProjectId ? Number(createProjectId) : null }
             : {})
@@ -164,8 +174,8 @@
             Creates a token for every ticket you can see. Hand it to a coding agent so it can
             list and read tickets and write back.
           {/if}
-          It stops working <strong>96 hours</strong> after you create it, and you can revoke it
-          at any time.
+          It stops working <strong>{ttlDays === 4 ? '96 hours' : ttlLabel(ttlDays)}</strong> after
+          you create it, and you can revoke it at any time.
         </p>
 
         <label class="flex items-start gap-2.5 mb-4 cursor-pointer select-none">
@@ -211,6 +221,23 @@
           {/if}
         {/if}
 
+        {#if ttlChoices.length > 1}
+          <div class="mb-4">
+            <label class="label block mb-1.5" for="agent-token-ttl">Expires in</label>
+            <select id="agent-token-ttl" class="input" data-testid="token-ttl" bind:value={ttlDays}>
+              {#each ttlChoices as d (d)}
+                <option value={d}>{ttlLabel(d)}</option>
+              {/each}
+            </select>
+            {#if ttlDays > 4}
+              <span class="block text-xs text-fainter mt-1">
+                Long-lived token for server-to-server integrations. Store it like a password and
+                revoke it when the integration is retired.
+              </span>
+            {/if}
+          </div>
+        {/if}
+
         {#if error}
           <p class="text-sm mb-3" style="color: var(--color-danger);" role="alert">{error}</p>
         {/if}
@@ -218,7 +245,7 @@
         <div class="flex justify-end gap-2">
           <button type="button" class="btn" onclick={onclose} disabled={busy}>Cancel</button>
           <button type="button" class="btn btn-primary" onclick={generate} disabled={busy}>
-            {busy ? 'Generating…' : 'Generate token (96 h)'}
+            {busy ? 'Generating…' : `Generate token (${ttlDays === 4 ? '96 h' : ttlLabel(ttlDays)})`}
           </button>
         </div>
       {:else}

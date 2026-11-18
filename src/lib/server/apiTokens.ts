@@ -2,13 +2,25 @@ import { db } from './db';
 import type { SessionUser } from './auth';
 import {
 	TOKEN_TTL_SECONDS,
+	allowedTtlDays,
 	generateToken,
+	parseMaxTtlDays,
 	hashToken,
 	isTokenUsable,
 	tokenPrefix
 } from './tokenCrypto';
 
 export const MAX_ACTIVE_TOKENS = 20;
+
+/** Instance cap on admin-chosen token lifetimes (API_TOKEN_MAX_TTL_DAYS, default 365). */
+export function maxTokenTtlDays(): number {
+	return parseMaxTtlDays(process.env.API_TOKEN_MAX_TTL_DAYS);
+}
+
+/** Lifetimes (days) this user may pick when creating a token. */
+export function tokenTtlChoices(isAdmin: boolean): number[] {
+	return allowedTtlDays(isAdmin, maxTokenTtlDays());
+}
 const LAST_USED_THROTTLE_SECONDS = 60;
 
 /** What request handlers see about the token that authenticated them. */
@@ -82,6 +94,8 @@ export function createApiToken(args: {
 	canReply: boolean;
 	canCreate?: boolean;
 	projectId?: number | null;
+	/** Lifetime in seconds; defaults to 96 hours. */
+	ttlSeconds?: number;
 }): { token: string; info: ApiTokenPublic } {
 	// Housekeeping: forget tokens that expired more than 30 days ago.
 	db.prepare('DELETE FROM api_tokens WHERE expires_at < unixepoch() - 2592000').run();
@@ -101,7 +115,7 @@ export function createApiToken(args: {
 			args.canReply ? 1 : 0,
 			args.canCreate ? 1 : 0,
 			args.projectId ?? null,
-			TOKEN_TTL_SECONDS
+			args.ttlSeconds ?? TOKEN_TTL_SECONDS
 		);
 	const row = db.prepare('SELECT * FROM api_tokens WHERE id = ?').get(Number(info.lastInsertRowid)) as Row;
 	return { token, info: toPublic(row) };
